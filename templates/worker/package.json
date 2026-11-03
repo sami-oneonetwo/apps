@@ -1,0 +1,12 @@
+{
+  "name": "__APP__",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --env preview"
+  }
+}

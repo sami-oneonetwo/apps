@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>__APP__</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 40rem; margin: 4rem auto; padding: 0 1.25rem; line-height: 1.5; }
+    code, pre { font-family: ui-monospace, monospace; }
+    pre { background: color-mix(in srgb, currentColor 8%, transparent); padding: 1rem; border-radius: .5rem; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>__APP__</h1>
+  <p>Deployed from <code>apps/__APP__</code>. The Worker answered:</p>
+  <pre id="out">loading…</pre>
+  <script>
+    fetch("/api/whoami")
+      .then((r) => r.json())
+      .then((j) => { document.getElementById("out").textContent = JSON.stringify(j, null, 2); })
+      .catch((e) => { document.getElementById("out").textContent = String(e); });
+  </script>
+</body>
+</html>

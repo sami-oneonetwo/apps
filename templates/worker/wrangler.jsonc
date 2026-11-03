@@ -1,0 +1,37 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "__APP__",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // Static files in ./public are served directly; /api/* hits the Worker first.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The custom domain is the ONLY way in, and it sits behind Cloudflare Access.
+  // workers.dev and version URLs are public by default, so they are switched off.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "__APP__.apps.fatherbean.com", "custom_domain": true }
+  ],
+
+  // Non-main branches deploy here as a separate Worker: __APP__-preview.
+  // Bindings (vars, kv_namespaces, d1_databases, r2_buckets...) are NOT
+  // inherited by environments: declare them in both places.
+  "env": {
+    "preview": {
+      "name": "__APP__-preview",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [
+        { "pattern": "__APP__-preview.apps.fatherbean.com", "custom_domain": true }
+      ]
+    }
+  }
+}
