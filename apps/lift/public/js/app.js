@@ -259,8 +259,8 @@ function achillesSheet() {
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ach-h">
         <h2 id="ach-h">Achilles check</h2>
         <p class="muted">How does it feel right now? 0 is nothing, 10 is the worst it's been. This sets today's calf load.</p>
-        <div class="scale" role="group" aria-label="Achilles score 0 to 10">${Array.from({ length: 11 }, (_, i) => `<button data-a="${i}" class="${i <= 3 ? "ok" : i <= 5 ? "warn" : "bad"}">${i}</button>`).join("")}</div>
-        <div class="scale-legend small muted"><span>Fine</span><span>Careful</span><span>Ease off</span></div>
+        <div class="scale" role="group" aria-label="Achilles score 0 to 10">${Array.from({ length: 11 }, (_, i) => `<button data-a="${i}" data-band="${i <= 3 ? "ok" : i <= 5 ? "warn" : "bad"}">${i}</button>`).join("")}</div>
+        <div class="scale-legend small"><span data-band="ok">0–3 fine</span><span data-band="warn">4–5 careful</span><span data-band="bad">6+ ease off</span></div>
         <div class="actions"><button class="btn quiet block" data-a="skip">Skip the check today</button></div>
       </div>`;
     sheetOpen = true;
@@ -377,6 +377,12 @@ async function doSwap() {
 }
 
 // ---------- Runner ----------
+const ADVICE_SHORT = {
+  up: "Up from last time", hold: "Same weight, one more rep", deload: "Lighter today",
+  new: "Find your working weight", "reps-only": "Top of the range: add load or a harder version",
+};
+const REF_TABS = [["move", "Movement"], ["form", "Cues"], ["muscles", "Muscles"], ["why", "Notes"]];
+
 function viewRun() {
   const w = activeWorkout();
   if (!w) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><div class="empty"><p>No session in progress.</p><a class="btn primary" href="#/">Go to today</a></div>`;
@@ -387,65 +393,93 @@ function viewRun() {
   const t = e.target;
   const next = w.entries[idx + 1];
   const cfg = db.settings();
+  const hue = hueFor(w.sessionKey);
   const st = (en) => { const d = en.sets.filter((s) => s.done).length; return d === 0 ? "none" : d >= en.sets.length ? "done" : "part"; };
   const allDone = e.sets.length && e.sets.every((s) => s.done);
   const askFeel = allDone && (w.phase === "calibration" || cfg.track?.feelAlways) && e.role !== "rehab";
-  const calfTarget = e.role === "rehab" && cfg.bodyweightKg ? `<p class="small muted">Physio target: work up to your bodyweight, ${fmtKg(cfg.bodyweightKg)} kg.</p>` : "";
+  const curSi = e.sets.findIndex((s) => !s.done);
+  const target = e.sets[curSi >= 0 ? curSi : 0];
+  const targetText = target?.weight ? `${fmtKg(target.weight)} kg × ${target.reps}` : `${target?.reps ?? t.repMin} reps`;
 
   return `
-  <header class="top">
+  <header class="top run-top">
     <a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a>
-    <div class="grow title run-title">${disc(w.sessionKey, hueFor(w.sessionKey))}${esc(w.name)}</div>
+    <div class="grow title run-title">${disc(w.sessionKey, hue)}<span>${esc(w.name)}</span></div>
+    <span class="run-count">${idx + 1}/${n}</span>
     <button class="icon-btn" data-act="run-menu" aria-label="Session options">${I.more}</button>
   </header>
-  <div class="seq-strip" role="list" aria-label="Exercises">
-    ${w.entries.map((en, i) => `<button role="listitem" data-act="jump" data-i="${i}" data-state="${st(en)}" ${i === idx ? 'aria-current="step"' : ""} aria-label="${esc(en.name)}">${i + 1}</button>`).join("")}
-  </div>
-  ${motionFor(ex) ? `<div class="mv-card">${movementHtml(motionFor(ex), e.name)}</div>` : ""}
-  <div class="ex-head">
-    <h1 class="ex-title">${esc(e.name)}</h1>
-    ${e.sets.some((s) => s.done) ? "" : `<button class="btn sm swap-btn" data-act="swap" aria-label="Swap ${esc(e.name)}">${I.swap}Swap</button>`}
-  </div>
-  ${e.role === "rehab" ? `<p class="tag-line"><span class="tag">Achilles rehab</span>${w.achilles != null ? ` Achilles today: ${w.achilles}/10` : ""}</p>` : ""}
-  ${e.swappedFrom ? `<p class="small muted">Swapped in for ${esc(db.get("exercise", e.swappedFrom)?.name ?? "the planned exercise")}.</p>` : ""}
-  <div class="target">
-    <span>${t.sets} × ${repRange(t)}<small>sets × reps</small></span>
-    <span>${mmss(t.restSec)}<small>rest</small></span>
-  </div>
-  <div class="advice" data-kind="${e.advice.kind}">${esc(e.advice.text)}${e.note ? `<br><span class="small">${esc(e.note)}</span>` : ""}</div>
-  ${calfTarget}
-  ${isBar(ex) ? `<div class="loadout" id="loadout">${loadoutHtml(e)}</div>` : ""}
-  ${e.last ? `<p class="last">Last time, ${fmtShort(e.last.at)}: ${setsText(e.last.sets)}</p>` : ""}
-  <div class="sets">
-    <div class="set-head"><span></span><span>${isBodyweight(ex) ? "Added kg" : "kg"}</span><span>Reps</span><span></span></div>
-    ${e.sets.map((s, si) => setRow(s, si, ex, cfg)).join("")}
-  </div>
-  <div style="display:flex;gap:.5rem;margin-top:.5rem">
-    <button class="btn sm" data-act="add-set">Add set</button>
-    ${e.sets.length > 1 ? `<button class="btn sm quiet" data-act="remove-set">Remove last set</button>` : ""}
-  </div>
-  ${askFeel ? `<div class="feel" role="group" aria-label="How did ${esc(e.name)} feel?"><p>How did that feel?</p><div class="feel-btns">
-      ${["easy", "right", "hard"].map((f) => `<button data-act="feel" data-v="${f}" aria-pressed="${e.feel === f}">${{ easy: "Easy", right: "About right", hard: "Hard" }[f]}</button>`).join("")}
-    </div></div>` : ""}
-  ${ex ? `<details class="howto" ${db.ui().howtoOpen === false ? "" : "open"}>
-    <summary>Form cues and muscles</summary>
-    <div class="howto-body">
-      ${bodyMap(ex.muscles || [], ex.secondary || [])}
-      ${ex.cues?.length ? `<ul class="cues">${ex.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : `<p class="muted small">No cues yet. Add some on the exercise page.</p>`}
+  <nav class="seq" aria-label="Exercises" data-hue="${hue}">
+    ${w.entries.map((en, i) => `<button data-act="jump" data-i="${i}" data-state="${st(en)}" ${i === idx ? 'aria-current="step"' : ""} aria-label="${i + 1}: ${esc(en.name)}${st(en) === "done" ? ", done" : ""}"></button>`).join("")}
+  </nav>
+
+  <section class="focus" aria-label="Current exercise" data-hue="${hue}">
+    <div class="ex-head">
+      <h1 class="ex-title">${esc(e.name)}</h1>
+      ${e.sets.some((s) => s.done) ? "" : `<button class="btn tonal sm swap-btn" data-act="swap" aria-label="Swap ${esc(e.name)}">${I.swap}Swap</button>`}
     </div>
-  </details>` : ""}
-  ${next ? `<div class="up-next"><div class="muted">Up next</div><h3>${esc(next.name)}</h3><div class="small muted">${next.target.sets} × ${repRange(next.target)}${next.sets[0]?.weight ? ` at ${fmtKg(next.sets[0].weight)} kg` : ""}</div></div>` : ""}
-  <div class="run-nav" data-hue="${hueFor(w.sessionKey)}">
-    <button class="btn" data-act="jump" data-i="${idx - 1}" ${idx === 0 ? "disabled" : ""}>Previous</button>
-    ${next ? `<button class="btn go" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
-           : `<button class="btn go" data-act="finish">Finish session</button>`}
+    ${e.role === "rehab" || e.swappedFrom ? `<p class="ex-sub">${e.role === "rehab" ? `<span class="tag tag-rehab">Achilles rehab</span>${w.achilles != null ? ` Achilles today ${w.achilles}/10` : ""}` : ""}${e.swappedFrom ? `${e.role === "rehab" ? ". " : ""}Swapped in for ${esc(db.get("exercise", e.swappedFrom)?.name ?? "the planned exercise")}` : ""}</p>` : ""}
+    <dl class="chips">
+      <div><dt>Plan</dt><dd>${t.sets} × ${repRange(t)}</dd></div>
+      <div><dt>Rest</dt><dd>${mmss(t.restSec)}</dd></div>
+      <div class="chip-target" data-kind="${e.advice.kind}"><dt>${esc(ADVICE_SHORT[e.advice.kind] || "Target")}</dt><dd>${targetText}</dd></div>
+    </dl>
+    ${isBar(ex) ? `<div class="loadout" id="loadout">${loadoutHtml(e)}</div>` : ""}
+    <div class="sets" role="table" aria-label="Sets">
+      <div class="set-head" role="row"><span role="columnheader"><span class="sr">Set</span></span><span role="columnheader">${isBodyweight(ex) ? "Added kg" : "kg"}</span><span role="columnheader">Reps</span><span role="columnheader"><span class="sr">Done</span></span></div>
+      ${e.sets.map((s, si) => (si === curSi ? `<div id="rest-slot"></div>` : "") + setRow(s, si, ex, cfg, si === curSi)).join("")}
+      ${curSi < 0 ? `<div id="rest-slot"></div>` : ""}
+    </div>
+    <div class="set-tools">
+      <button class="btn quiet sm" data-act="add-set">+ Add set</button>
+      ${e.sets.length > 1 ? `<button class="btn quiet sm" data-act="remove-set">− Remove set</button>` : ""}
+    </div>
+    ${askFeel ? `<div class="feel" role="group" aria-label="How did ${esc(e.name)} feel?"><p>How did that feel?</p><div class="feel-btns">
+        ${["easy", "right", "hard"].map((f) => `<button data-act="feel" data-v="${f}" aria-pressed="${e.feel === f}">${{ easy: "Easy", right: "About right", hard: "Hard" }[f]}</button>`).join("")}
+      </div></div>` : ""}
+  </section>
+
+  ${ex ? referencePanel(e, ex, w, cfg) : ""}
+
+  <div class="run-nav" data-hue="${hue}">
+    ${next ? `<p class="up-next-line"><span class="muted">Next</span> ${esc(next.name)}, ${next.target.sets} × ${repRange(next.target)}</p>` : `<p class="up-next-line"><span class="muted">Last exercise</span></p>`}
+    <div class="run-nav-btns">
+      <button class="btn tonal icon-only" data-act="jump" data-i="${idx - 1}" ${idx === 0 ? "disabled" : ""} aria-label="Previous exercise">${I.back}</button>
+      ${next ? `<button class="btn primary" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
+             : `<button class="btn go" data-act="finish">Finish session</button>`}
+    </div>
   </div>`;
 }
 
-function setRow(s, si, ex, cfg) {
+/** Everything you might look up mid-session, in one place. */
+function referencePanel(e, ex, w, cfg) {
+  const motion = motionFor(ex);
+  const tabs = REF_TABS.filter(([k]) => k !== "move" || motion);
+  let cur = db.ui().refTab || "move";
+  if (!tabs.some(([k]) => k === cur)) cur = tabs[0][0];
+  const open = db.ui().refOpen !== false;
+  const calfTarget = e.role === "rehab" && cfg.bodyweightKg ? `<p>Physio target: work up to your bodyweight, ${fmtKg(cfg.bodyweightKg)} kg.</p>` : "";
+  const body = {
+    move: () => movementHtml(motion, e.name),
+    form: () => ex.cues?.length ? `<ol class="cues">${ex.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>` : `<p class="muted">No cues yet. Add some on the exercise page.</p>`,
+    muscles: () => `<div class="ref-muscles">${bodyMap(ex.muscles || [], ex.secondary || [])}<p><strong>Main:</strong> ${esc((ex.muscles || []).join(", ") || "not set")}${ex.secondary?.length ? `<br><strong>Also:</strong> ${esc(ex.secondary.join(", "))}` : ""}</p></div>`,
+    why: () => `<div class="ref-why">
+        ${e.last ? `<p class="ref-last"><span class="muted">${fmtDate(e.last.at)}</span><br><strong>${setsText(e.last.sets)}</strong></p>` : `<p class="muted">First time doing this exercise.</p>`}
+        <p>${esc(e.advice.text)}</p>${e.note ? `<p>${esc(e.note)}</p>` : ""}${calfTarget}
+      </div>`,
+  };
+  return `<section class="ref ${open ? "open" : ""}" aria-label="Reference">
+    <div class="ref-bar">
+      <div class="seg" role="tablist" aria-label="Reference">${tabs.map(([k, label]) => `<button role="tab" data-act="ref-tab" data-v="${k}" aria-selected="${open && k === cur}">${label}</button>`).join("")}</div>
+      <button class="icon-btn ref-toggle" data-act="ref-open" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} reference">${open ? I.x : I.more}</button>
+    </div>
+    ${open ? `<div class="ref-body" role="tabpanel">${body[cur]()}</div>` : ""}
+  </section>`;
+}
+
+function setRow(s, si, ex, cfg, current = false) {
   const step = incrementFor(ex) || 1;
   const effort = cfg.track?.effortPerSet ? `<div class="effort" role="group" aria-label="Reps left in set ${si + 1}"><span class="small muted">Reps left</span>${[0, 1, 2, 3].map((r) => `<button data-act="rir" data-si="${si}" data-v="${r}" aria-pressed="${s.rir === r}">${r === 3 ? "3+" : r}</button>`).join("")}</div>` : "";
-  return `<div class="set ${s.done ? "done" : ""}" data-si="${si}">
+  return `<div class="set ${s.done ? "done" : ""} ${current ? "current" : ""}" data-si="${si}" role="row">
     <span class="idx">${si + 1}</span>
     <div class="stepper">
       <button data-act="step" data-f="weight" data-si="${si}" data-d="${-step}" aria-label="Less weight" tabindex="-1">−</button>
@@ -465,13 +499,13 @@ function loadoutHtml(e) {
   const cur = e.sets.find((s) => !s.done) || e.sets[e.sets.length - 1];
   const w = +cur?.weight;
   const cfg = db.settings();
-  if (!w) return `<div class="weight-big">–<small>kg</small></div><div class="plate-label">Enter a weight to see the plates.</div>`;
+  if (!w) return "";
   const p = plateSvg(w, cfg.barKg, cfg.plates);
   let label;
-  if (w < cfg.barKg) label = `Lighter than the ${fmtKg(cfg.barKg)} kg bar.`;
-  else if (!p.label || p.label === "Empty bar") label = `Just the ${fmtKg(cfg.barKg)} kg bar.`;
-  else label = `Each side: ${p.label} kg${p.remainder > 0.001 ? `, ${fmtKg(p.remainder)} kg short` : ""}`;
-  return `<div class="weight-big">${fmtKg(w)}<small>kg</small></div>${w >= cfg.barKg ? p.svg : ""}<div class="plate-label">${label}</div>`;
+  if (w < cfg.barKg) label = `Lighter than the ${fmtKg(cfg.barKg)} kg bar`;
+  else if (!p.label || p.label === "Empty bar") label = `Just the ${fmtKg(cfg.barKg)} kg bar`;
+  else label = `Each side: <strong>${p.label}</strong>${p.remainder > 0.001 ? `, ${fmtKg(p.remainder)} kg short` : ""}`;
+  return `${w >= cfg.barKg ? p.svg : ""}<p class="plate-label">${label}</p>`;
 }
 
 function curEntry() {
@@ -540,11 +574,14 @@ function startRest(sec, label) {
   db.ui({ rest: { endsAt: Date.now() + sec * 1000, total: sec, label } });
 }
 function renderRest() {
-  const el = $("#rest");
+  // On the session screen the timer docks inline, right above the set you're about to do.
+  const floating = $("#rest");
+  floating.hidden = true; floating.innerHTML = "";
+  const el = $("#rest-slot");
   const rest = db.ui().rest;
   clearInterval(restTimer);
-  if (!rest || route().name !== "run") { el.hidden = true; el.innerHTML = ""; return; }
-  el.hidden = false;
+  if (!el) return;
+  if (!rest || route().name !== "run") { el.innerHTML = ""; return; }
   el.innerHTML = `<div class="rest-card" role="timer" aria-live="off">
     <div class="bar"></div>
     <div class="rest-label">${esc(rest.label || "Rest")}</div>
@@ -660,15 +697,12 @@ let lastCoachRequest = null;
 function viewCoach() {
   const logs = db.list("coachlog").sort((a, b) => b.at - a.at);
   return `
-  <header class="top"><div class="grow"><h1>Coach</h1></div>${syncDot()}</header>
+  <header class="top"><div class="grow"><h1>Coach</h1></div><button class="btn quiet sm" data-act="coach-run" data-trigger="new-block" ${coachBusy ? "disabled" : ""}>New block</button></header>
   ${signinBanner()}
   <form class="ask" data-form="ask">
-    <label for="ask-q" class="small" style="font-weight:600">Ask or tell your coach</label>
-    <textarea id="ask-q" class="input" rows="3" placeholder="e.g. Achilles is sore after a long run, only have 30 minutes today, the cable station is always busy…"></textarea>
-    <div class="ask-row">
-      <button class="btn primary" type="submit" ${coachBusy ? "disabled" : ""}>Send</button>
-      <button class="btn quiet" type="button" data-act="coach-run" data-trigger="new-block" ${coachBusy ? "disabled" : ""}>Write a new block</button>
-    </div>
+    <label for="ask-q" class="sr">Ask or tell your coach</label>
+    <textarea id="ask-q" class="input" rows="2" placeholder="Ask or tell your coach: sore Achilles, short on time, machine busy…"></textarea>
+    <button class="btn primary" type="submit" ${coachBusy ? "disabled" : ""}>Send</button>
   </form>
   ${coachStatus()}
   <p class="small muted" style="margin:.75rem 0">Your coach reviews each session when you finish and changes the plan when it needs to. Every change has a reason, and you can undo it.</p>
@@ -697,11 +731,11 @@ function viewWorkout(id) {
   <header class="top">
     <a class="icon-btn" href="#/history" aria-label="Back to history">${I.back}</a>
     <div class="grow title">${fmtDate(w.startedAt)}</div>
-    <button class="btn sm danger" data-act="delete-workout" data-id="${w.id}">Delete</button>
+    <button class="btn quiet danger sm" data-act="delete-workout" data-id="${w.id}">Delete</button>
   </header>
   <div class="title-with-disc">${w.sessionKey ? disc(w.sessionKey, hueFor(w.sessionKey, db.get("program", w.programId))) : ""}<h1>${esc(w.name)}</h1></div>
   <div class="stat-line">
-    <div>${w.finishedAt ? fmtDur(w.finishedAt - w.startedAt) : "–"}<small>duration</small></div>
+    ${w.finishedAt && w.finishedAt - w.startedAt >= 60e3 ? `<div>${fmtDur(w.finishedAt - w.startedAt)}<small>duration</small></div>` : ""}
     <div>${sets.length}<small>sets</small></div>
     <div>${Math.round(vol).toLocaleString("en-AU")}<small>kg lifted</small></div>
     ${w.achilles != null ? `<div>${w.achilles}/10<small>Achilles</small></div>` : ""}
@@ -714,10 +748,22 @@ function viewWorkout(id) {
     const pr = best > 0 && prev > 0 && best > prev + 0.01;
     return `<div class="wo-ex">
       <h3><a href="#/exercise/${e.exerciseId}" style="text-decoration:none">${esc(e.name)}</a>${pr ? `<span class="badge">New best</span>` : ""}${e.feel ? `<span class="small muted" style="font-family:var(--text);font-weight:400">felt ${e.feel === "right" ? "about right" : e.feel}</span>` : ""}</h3>
-      <div class="wo-sets">${e.sets.map((s) => `<span>${+s.weight ? `${fmtKg(s.weight)} kg × ${s.reps}` : `${s.reps} reps`}</span>`).join("")}</div>
+      <div class="wo-sets">${groupSets(e.sets).map((g) => `<span>${g}</span>`).join("")}</div>
     </div>`;
   }).join("")}
   ${tabs("history")}`;
+}
+
+/** "3 × 8 at 60 kg" instead of repeating identical sets. */
+function groupSets(sets) {
+  const out = [];
+  for (const s of sets) {
+    const k = `${+s.weight || 0}|${s.reps}`;
+    const last = out[out.length - 1];
+    if (last && last.k === k) last.n++;
+    else out.push({ k, n: 1, w: +s.weight || 0, r: s.reps });
+  }
+  return out.map((g) => `${g.n > 1 ? `${g.n} × ` : ""}${g.r}${g.w ? ` at ${fmtKg(g.w)} kg` : " reps"}`);
 }
 
 // ---------- History ----------
@@ -762,14 +808,15 @@ function viewProgress() {
   const last = setsPerMuscle(ws, ex, thisWeek - WEEK, thisWeek);
   const targets = p?.targets || {};
   const pri = new Set(p?.priorities || []);
-  const muscles = MUSCLES.filter((m) => (targets[m] || 0) > 0).sort((a, b) => (pri.has(b) - pri.has(a)) || targets[b] - targets[a]);
+  const gap = (m) => (now[m] || 0) / targets[m];
+  const muscles = MUSCLES.filter((m) => (targets[m] || 0) > 0).sort((a, b) => (pri.has(b) - pri.has(a)) || gap(a) - gap(b));
   const fmt1 = (v) => (Math.round(v * 2) / 2).toString();
 
   const volume = muscles.map((m) => {
     const v = now[m] || 0, t = targets[m];
     const pct = Math.min(130, (v / t) * 100);
     return `<li class="vol">
-      <div class="vol-label"><span>${esc(m)}${pri.has(m) ? ` <span class="tag">Priority</span>` : ""}</span><span><span class="num">${fmt1(v)}</span> <span class="muted small">of ${t}, last week ${fmt1(last[m] || 0)}</span></span></div>
+      <div class="vol-label"><span>${pri.has(m) ? `<i class="pri-dot" title="Priority"></i>` : ""}${esc(m)}${pri.has(m) ? `<span class="sr"> (priority)</span>` : ""}</span><span><span class="num">${fmt1(v)}</span> <span class="muted small">of ${t}, last week ${fmt1(last[m] || 0)}</span></span></div>
       <div class="vol-track" aria-hidden="true"><div class="vol-bar ${v >= t ? "met" : ""}" style="width:${(pct / 130) * 100}%"></div><div class="vol-target" style="left:${(100 / 130) * 100}%"></div></div>
     </li>`;
   }).join("");
@@ -801,16 +848,16 @@ function viewProgress() {
 
   return `
   <header class="top"><div class="grow"><h1>Progress</h1></div></header>
-  <section><div class="section-head"><h2>Sets this week</h2><span class="small muted">vs block targets</span></div>
-    ${muscles.length ? `<ul class="vols">${volume}</ul><p class="small muted">Main muscles count a full set, helpers half. The line marks the weekly target.</p>` : `<p class="muted">No block targets yet.</p>`}
+  <section><div class="section-head"><h2>Sets this week</h2></div>
+    ${muscles.length ? `<p class="small muted section-note">Against this block's weekly targets (the line). Main muscles count a full set, helpers half. <i class="pri-dot"></i> marks your priorities.</p><ul class="vols">${volume}</ul>` : `<p class="muted">No block targets yet.</p>`}
   </section>
-  <section><div class="section-head"><h2>Consistency</h2><span class="small muted">sessions per week, goal ${goal}</span></div>
-    <div class="chart">${consistency}</div></section>
+  <section><div class="section-head"><h2>Consistency</h2><span class="small muted">goal ${goal} a week</span></div>
+    ${counts.filter((c) => c > 0).length >= 3 ? `<div class="chart">${consistency}</div>` : `<p class="stat-big"><span class="num">${counts[7]}</span> of ${goal} sessions this week</p><p class="small muted">A weekly chart appears once you have three weeks of training.</p>`}</section>
   <section><div class="section-head"><h2>Main lifts</h2><span class="small muted">estimated 1-rep max</span></div>
     ${mainRows ? `<ul class="rows">${mainRows}</ul>` : `<p class="muted">No main lifts in this block.</p>`}</section>
   <section><div class="section-head"><h2>Personal bests</h2></div>
     ${pbs.length ? `<ul class="rows">${pbs.map((b) => `<li><a href="#/workout/${b.wid}"><span class="r-main"><span class="r-title">${esc(b.name)}</span><br><span class="r-sub">${fmtDate(b.at)}: ${b.weight ? `${fmtKg(b.weight)} kg × ${b.reps}` : `${b.reps} reps`}</span></span><span class="r-side">${fmtKg(roundTo(b.est, 0.5))} kg</span></a></li>`).join("")}</ul>` : `<p class="muted">New bests show up here once you beat a previous session.</p>`}</section>
-  <p style="margin-top:1.5rem"><a class="btn block" href="#/exercises">All exercises</a></p>
+  <ul class="rows link-rows" style="margin-top:1.5rem"><li><a href="#/exercises"><span class="r-title">All exercises</span><span class="chev" aria-hidden="true">›</span></a></li></ul>
   ${tabs("progress")}`;
 }
 
@@ -843,7 +890,7 @@ function viewExercise(id) {
   <header class="top">
     <a class="icon-btn" href="#/exercises" aria-label="Back to exercises">${I.back}</a>
     <div class="grow title">Exercise</div>
-    <button class="btn sm danger" data-act="delete-exercise" data-id="${ex.id}">Delete</button>
+    <button class="btn quiet danger sm" data-act="delete-exercise" data-id="${ex.id}">Delete</button>
   </header>
   <label class="field"><span>Name</span><input class="input big" data-xfield="name" value="${esc(ex.name)}" autocomplete="off"></label>
   ${chartData.length >= 2 ? `<figure class="chart" style="margin-inline:0">
@@ -917,7 +964,7 @@ function viewSettings() {
   return `
   <header class="top"><a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a><div class="grow"><h1>Settings</h1></div></header>
   <label class="field"><span>About you (your coach reads this)</span><textarea class="input" data-sset="profile" rows="9">${esc(s.profile || "")}</textarea></label>
-  <label class="field"><span>Bodyweight (kg), the target for your calf raises</span><input class="input" type="number" inputmode="decimal" step="any" min="0" data-sset="bodyweightKg" value="${s.bodyweightKg ?? ""}" style="max-width:9rem"></label>
+  <label class="field"><span>Bodyweight (kg), the target for your calf raises</span><input class="input" type="number" inputmode="decimal" step="any" min="0" data-sset="bodyweightKg" placeholder="e.g. 78" value="${s.bodyweightKg ?? ""}" style="max-width:9rem"></label>
   <div class="section-head"><h2>Extra tracking</h2></div>
   <p class="small muted">Off by default. Each one adds a tap, and gives your coach more to work with.</p>
   ${toggle("effortPerSet", "Reps left per set", "After each set, tap how many more reps you had in you.")}
@@ -931,11 +978,11 @@ function viewSettings() {
   <p>${syncDot()}</p>
   <p class="small muted" style="margin:.4rem 0 .4rem">Everything is saved on this phone first and copied to your account when there's a connection.${db.pendingCount() ? ` ${plural(db.pendingCount(), "change")} waiting.` : ""}</p>
   <p class="small muted" id="whoami"></p>
-  <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem">
-    <button class="btn sm" data-act="sync-now">Sync now</button>
-    <button class="btn sm" data-act="export">Download my data</button>
-    <a class="btn sm" href="#/exercises">Exercise library</a>
-  </div>`;
+  <ul class="rows link-rows" style="margin-top:.8rem">
+    <li><button class="row" data-act="sync-now"><span class="r-title">Sync now</span><span class="chev" aria-hidden="true">›</span></button></li>
+    <li><button class="row" data-act="export"><span class="r-title">Download my data</span><span class="chev" aria-hidden="true">›</span></button></li>
+    <li><a href="#/exercises"><span class="r-title">Exercise library</span><span class="chev" aria-hidden="true">›</span></a></li>
+  </ul>`;
 }
 
 // ---------- toast ----------
@@ -960,6 +1007,8 @@ document.addEventListener("click", async (ev) => {
     case "signin": ev.preventDefault(); location.href = `/?signin=${Date.now()}${location.hash}`; return;
     case "begin": return beginSession(t.dataset.key);
     case "mv-toggle": return toggleMovement(t);
+    case "ref-tab": db.ui({ refTab: t.dataset.v, refOpen: true }); return render();
+    case "ref-open": db.ui({ refOpen: db.ui().refOpen === false }); return render();
     case "swap": return doSwap();
 
     case "jump": {

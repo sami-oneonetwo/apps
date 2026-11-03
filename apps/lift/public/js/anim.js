@@ -164,6 +164,25 @@ export function phaseAt(spec, ms) {
   return { t: 0, label: spec.labels?.[1] };
 }
 
+/** Tight vertical frame for a movement: sample the poses and fit the figure plus kit. */
+function viewBoxFor(spec) {
+  let minY = Infinity;
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+    const p = lerpPose(spec.A, spec.B, t);
+    const J = spec.view === "front" ? frontJoints(p) : sideJoints(p, spec.root);
+    for (const [k, pt] of Object.entries(J)) if (Array.isArray(pt)) minY = Math.min(minY, pt[1] - (k === "head" ? 11 : 6));
+    for (const pr of spec.props || []) {
+      if (pr.t === "plate" && J[pr.at]) minY = Math.min(minY, J[pr.at][1] + (pr.dy || 0) - (pr.r ?? 15) - 2);
+      if (pr.t === "mace" && J.maceEnd) minY = Math.min(minY, J.maceEnd[1] - 10);
+      if (pr.t === "cable") minY = Math.min(minY, pr.from[1] - 6);
+      if (pr.t === "bar") minY = Math.min(minY, Math.min(pr.y1, pr.y2) - 4);
+      if (pr.t === "rect" || pr.t === "pad") minY = Math.min(minY, pr.y ?? minY);
+    }
+  }
+  const top = Math.floor(Math.min(minY, GROUND - 60) - 8);
+  return `0 ${top} 200 ${GROUND + 6 - top}`;
+}
+
 const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Markup for a movement figure; call start() after it's in the DOM. */
@@ -172,7 +191,7 @@ export function movementHtml(spec, name) {
   const [go, back] = spec.tempo || [1.5, 1.5];
   const tempo = spec.labels ? `${spec.labels[0]} ${go} s, ${spec.labels[1].toLowerCase()} ${back} s` : "";
   return `<figure class="mv" data-mv>
-    <svg viewBox="0 -38 200 220" role="img" aria-label="Animation of ${name}: ${spec.say || "the movement"}">
+    <svg viewBox="${viewBoxFor(spec)}" role="img" aria-label="Animation of ${name}: ${spec.say || "the movement"}">
       <g data-frame>${frameSvg(spec, reduced() ? 1 : 0)}</g>
     </svg>
     <figcaption><span data-mv-phase>${spec.labels?.[0] ?? ""}</span>${tempo ? `<span class="mv-tempo">${tempo}</span>` : ""}
