@@ -39,7 +39,7 @@ jobs:
       apps: ${{ steps.pick.outputs.apps }}
       target: ${{ steps.pick.outputs.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -85,9 +85,9 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
 
@@ -102,11 +102,15 @@ jobs:
             exit 1
           }
 
+      - name: Test
+        working-directory: apps/${{ matrix.app }}
+        run: npm run test --if-present
+
       - name: Deploy
         working-directory: apps/${{ matrix.app }}
         run: |
           if [[ "${{ needs.plan.outputs.target }}" == "production" ]]; then
-            npx wrangler deploy
+            npx wrangler deploy --env=""
             host="${{ matrix.app }}.apps.fatherbean.com"
           else
             npx wrangler deploy --env preview

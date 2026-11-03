@@ -1,0 +1,43 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "lift",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // One SQLite-backed Durable Object per signed-in user holds all their data.
+  "durable_objects": {
+    "bindings": [{ "name": "LIFT_STORE", "class_name": "LiftStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiftStore"] }],
+
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "lift.apps.fatherbean.com", "custom_domain": true }
+  ],
+
+  // Preview is a separate Worker with its own Durable Object, so its data is
+  // separate from production. Bindings aren't inherited: keep both in step.
+  "env": {
+    "preview": {
+      "name": "lift-preview",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [
+        { "pattern": "lift-preview.apps.fatherbean.com", "custom_domain": true }
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "LIFT_STORE", "class_name": "LiftStore" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiftStore"] }]
+    }
+  }
+}

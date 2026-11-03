@@ -1,0 +1,14 @@
+{
+  "name": "lift",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --env preview",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.mjs",
+    "serve:test": "node --experimental-strip-types --no-warnings test/dev-server.mjs"
+  }
+}
