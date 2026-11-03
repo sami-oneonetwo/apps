@@ -13,7 +13,7 @@ let syncTimer = null;
 let syncing = false;
 let syncAgain = false;
 
-export const sync = { status: "idle", lastAt: null };
+export const sync = { status: "idle", lastAt: null, detail: null };
 
 function emptyState() {
   return { records: Object.fromEntries(KINDS.map((k) => [k, {}])), dirty: {}, cursor: 0, ui: {} };
@@ -157,8 +157,15 @@ export async function runSync() {
         redirect: "manual",
       });
       // Cloudflare Access redirects to its login page when the session has expired.
-      if (res.type === "opaqueredirect" || res.status === 401 || res.status === 403) {
+      if (res.type === "opaqueredirect" || res.status === 403) {
+        sync.detail = null;
         setStatus("signin");
+        return;
+      }
+      if (res.status === 401) {
+        const b = await res.json().catch(() => ({}));
+        sync.detail = b.message || null;
+        setStatus("noident");
         return;
       }
       if (!res.ok) throw new Error(`sync failed: ${res.status}`);

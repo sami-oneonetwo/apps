@@ -1,7 +1,7 @@
 // Offline support: serve the app from cache, refresh it in the background.
 // /api/* always goes to the network (the app queues changes itself when offline).
 
-const CACHE = "lift-shell-v2";
+const CACHE = "lift-shell-v3";
 const SHELL = [
   "/", "/index.html", "/app.css", "/manifest.webmanifest",
   "/js/app.js", "/js/store.js", "/js/seed.js", "/js/progression.js", "/js/plates.js", "/js/program.js", "/js/body.js",
@@ -34,8 +34,11 @@ self.addEventListener("fetch", (e) => {
 
   if (url.origin === location.origin) {
     if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/cdn-cgi/")) return;
-    const key = req.mode === "navigate" ? "/" : url.pathname;
-    e.respondWith(staleWhileRevalidate(CACHE, key, req));
+    if (req.mode === "navigate") {
+      e.respondWith(networkFirstPage(req));
+      return;
+    }
+    e.respondWith(staleWhileRevalidate(CACHE, url.pathname, req));
     return;
   }
 
@@ -51,4 +54,17 @@ async function staleWhileRevalidate(cacheName, key, req) {
     .then((r) => { if (good(r)) cache.put(key, r.clone()); return r; })
     .catch(() => null);
   return hit || (await net) || new Response("Offline and not cached yet. Open Lift once with a connection.", { status: 503 });
+}
+
+// Pages: go to the network first so Cloudflare Access can show its sign-in page
+// when the session has expired. Fall back to the cached app only when offline.
+async function networkFirstPage(req) {
+  try {
+    const r = await fetch(req);
+    if (r.type === "opaqueredirect" || r.redirected || r.status === 401 || r.status === 403) return r;
+    if (r.ok) (await caches.open(CACHE)).put("/", r.clone());
+    return r;
+  } catch {
+    return (await caches.match("/", { cacheName: CACHE })) || new Response("Offline and not cached yet. Open Lift once with a connection.", { status: 503 });
+  }
 }

@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { init, parseSyncBody, sync, type Change, type SyncResult } from "./sync";
+import { identify } from "./access";
 import { applyCoach, askClaude, buildUserPrompt, DEFAULT_MODEL, SYSTEM_PROMPT, type Snapshot, type Trigger } from "./coach";
 
 interface LiftEnv {
@@ -46,14 +47,6 @@ export class LiftStore extends DurableObject<LiftEnv> {
   }
 }
 
-/** The signed-in user. Cloudflare Access sets this header; locally there is no Access. */
-function userFor(request: Request, url: URL): string | null {
-  const email = request.headers.get("cf-access-authenticated-user-email");
-  if (email) return email.toLowerCase();
-  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return "local@dev";
-  return null;
-}
-
 const json = (body: unknown, status = 200) =>
   Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
@@ -71,8 +64,12 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
-    const user = userFor(request, url);
-    if (!user) return json({ error: "Sign in through Cloudflare Access" }, 401);
+    const who = await identify(request, url);
+    if (!who.email) {
+      console.log("auth failed", who.reason, [...request.headers.keys()].filter((k) => /^cf-|cookie/i.test(k)));
+      return json({ error: "no_identity", message: `Couldn't confirm who you are (${who.reason}).` }, 401);
+    }
+    const user = who.email;
     const store = env.LIFT_STORE.get(env.LIFT_STORE.idFromName(user));
 
     if (url.pathname === "/api/me" && request.method === "GET") {

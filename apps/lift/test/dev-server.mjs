@@ -46,6 +46,14 @@ function fakeCoach(snap, trigger, message) {
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const send = (status, body, type = "application/json") => { res.writeHead(status, { "content-type": type, "cache-control": "no-store" }); res.end(body); };
+  // ACCESS=1 imitates Cloudflare Access: no CF_Authorization cookie → redirect to a login page.
+  if (process.env.ACCESS && !url.pathname.startsWith("/fake-access")) {
+    const authed = /(?:^|;\s*)CF_Authorization=ok/.test(req.headers.cookie || "");
+    if (!authed) { res.writeHead(302, { location: `/fake-access/login?redirect_url=${encodeURIComponent(url.pathname + url.search)}` }); return res.end(); }
+  }
+  if (url.pathname === "/fake-access/login") return send(200, `<!doctype html><h1 id="access-login">Sign in to Lift</h1><a id="go" href="/fake-access/callback?r=${encodeURIComponent(url.searchParams.get("redirect_url") || "/")}">Continue</a>`, "text/html");
+  if (url.pathname === "/fake-access/callback") { res.writeHead(302, { "set-cookie": "CF_Authorization=ok; Path=/", location: url.searchParams.get("r") || "/" }); return res.end(); }
+  if (process.env.NOIDENT && url.pathname === "/api/sync") return send(401, JSON.stringify({ error: "no_identity", message: "Couldn't confirm who you are (no Access identity on the request)." }));
   if (url.pathname === "/api/me") return send(200, JSON.stringify({ email: "local@dev", coach: COACH !== "off" }));
   if (url.pathname === "/api/coach" && req.method === "POST") {
     if (COACH === "off") return send(503, JSON.stringify({ error: "no_key", message: "The coach needs an ANTHROPIC_API_KEY secret on this Worker." }));

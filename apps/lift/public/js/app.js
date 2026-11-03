@@ -59,10 +59,13 @@ const tabs = (cur) => `
   <a href="#/history" ${cur === "history" ? 'aria-current="page"' : ""}>${I.history}History</a>
 </nav>`;
 
-const SYNC_TEXT = { idle: "Not synced yet", syncing: "Syncing", synced: "Synced", pending: "Changes waiting", offline: "Offline, saved on phone", error: "Sync failed, will retry", signin: "Sign in to sync" };
+const SYNC_TEXT = { idle: "Not synced yet", syncing: "Syncing", synced: "Synced", pending: "Changes waiting", offline: "Offline, saved on phone", error: "Sync failed, will retry", signin: "Sign in to sync", noident: "Sync blocked" };
 const syncDot = () => `<span class="sync-dot" data-s="${db.sync.status}"><i></i>${SYNC_TEXT[db.sync.status] || ""}</span>`;
 const signinBanner = () => db.sync.status === "signin"
-  ? `<div class="banner">Your sign-in has expired, so changes are only on this phone. <a href="${location.pathname}" data-act="reload">Sign in again</a></div>` : "";
+  ? `<div class="banner">Your sign-in has expired, so changes are only on this phone. <a href="/" data-act="signin">Sign in again</a></div>`
+  : db.sync.status === "noident"
+    ? `<div class="banner">You're signed in, but the server couldn't confirm who you are, so changes are only on this phone. ${esc(db.sync.detail || "")} <a href="/" data-act="signin">Try signing in again</a></div>`
+    : "";
 
 function route() {
   const [name, id] = location.hash.replace(/^#\/?/, "").split("/");
@@ -558,8 +561,9 @@ async function callCoach(trigger, message = "") {
       method: "POST", headers: { "content-type": "application/json" }, redirect: "manual",
       body: JSON.stringify({ trigger, message }),
     });
-    if (res.type === "opaqueredirect" || res.status === 401) throw Object.assign(new Error("Your sign-in has expired. Reload to sign in again."), {});
+    if (res.type === "opaqueredirect") throw new Error("Your sign-in has expired. Use Sign in again at the top of the page.");
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new Error(body.message || "The server couldn't confirm who you are.");
     if (res.status === 503 && body.error === "no_key") { coachInfo.available = false; throw Object.assign(new Error(body.message), { noKey: true }); }
     if (!res.ok) throw new Error(body.message || `The coach couldn't answer (${res.status}).`);
     await db.runSync();
@@ -912,6 +916,7 @@ document.addEventListener("click", async (ev) => {
 
   switch (act) {
     case "reload": ev.preventDefault(); location.reload(); return;
+    case "signin": ev.preventDefault(); location.href = `/?signin=${Date.now()}${location.hash}`; return;
     case "begin": return beginSession(t.dataset.key);
     case "swap": return doSwap();
 
@@ -1139,6 +1144,9 @@ const busy = () => {
 db.subscribe((reason) => {
   document.querySelectorAll(".sync-dot").forEach((el) => { el.outerHTML = syncDot(); });
   if (reason === "remote") pendingRender = true;
+  // Show or clear the sign-in banner as soon as the sign-in state changes.
+  const needsBanner = ["signin", "noident"].includes(db.sync.status);
+  if (needsBanner !== !!document.querySelector("#app .banner a[data-act=signin]")) pendingRender = true;
   if (pendingRender && !busy()) { pendingRender = false; render(); }
   if (reason !== "local" && db.sync.status === "synced") maybeRunPendingCoach();
 });

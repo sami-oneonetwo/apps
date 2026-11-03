@@ -86,7 +86,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sync-dot i { width: .55rem; height: .55rem; border-radius: 50%; background: var(--steel-light); display: inline-block; }
 .sync-dot[data-s="synced"] i { background: var(--done); }
 .sync-dot[data-s="syncing"] i, .sync-dot[data-s="pending"] i { background: var(--plate-yellow); }
-.sync-dot[data-s="signin"] i, .sync-dot[data-s="error"] i { background: var(--plate-red); }
+.sync-dot[data-s="signin"] i, .sync-dot[data-s="noident"] i, .sync-dot[data-s="error"] i { background: var(--plate-red); }
 
 .resume {
   display: block; margin: .25rem 0 1.5rem; padding: 1rem 1.1rem;
