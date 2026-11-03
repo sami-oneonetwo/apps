@@ -4,6 +4,8 @@ import { history, prescribe, trend, e1rm, fmtKg, roundTo } from "./progression.j
 import { plateSvg } from "./plates.js";
 import { blockPosition, nextSession, setsPerMuscle, weekStart, PHASE_TEXT, WEEK } from "./program.js";
 import { bodyMap } from "./body.js";
+import { movementHtml, start as startMovement, toggle as toggleMovement } from "./anim.js";
+import { motionFor } from "./motions.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -43,6 +45,23 @@ const isBodyweight = (ex) => ex?.equipment === "bodyweight";
 const incrementFor = (ex) => ex?.increment ?? DEFAULT_INCREMENT[ex?.equipment] ?? 2.5;
 const activeProgram = () => db.list("program").filter((p) => p.status === "active").sort((a, b) => b.startedAt - a.startedAt)[0] || null;
 
+// Each session wears a plate colour: A red, B blue, C yellow, D green.
+const HUES = ["red", "blue", "yellow", "green"];
+function hueFor(key, program = activeProgram()) {
+  const i = program?.sessions.findIndex((s) => s.key === key) ?? -1;
+  return HUES[(i >= 0 ? i : Math.max(0, String(key || "A").charCodeAt(0) - 65)) % HUES.length];
+}
+const disc = (key, hue, done = false) => `<span class="disc" data-hue="${hue}" aria-hidden="true">${done ? I.check : esc(key ?? "")}</span>`;
+const weekday = () => new Date().toLocaleDateString("en-AU", { weekday: "long" });
+
+function blockMeter(p, pos) {
+  return `<a class="block-meter" href="#/block" aria-label="${esc(p.name)}, week ${Math.min(pos.week + 1, pos.weeks)} of ${pos.weeks}. About this block">
+    <span class="bm-name">${esc(p.name)}</span>
+    <span class="bm-week">${pos.done ? "Finished" : `Week ${pos.week + 1} of ${pos.weeks}, ${PHASE_TEXT[pos.phase].toLowerCase()}`}</span>
+    <span class="bm-track" style="--n:${p.phases.length}" aria-hidden="true">${p.phases.map((ph, i) => `<i class="${ph}${i < pos.week ? " past" : i === pos.week ? " now" : ""}"></i>`).join("")}</span>
+  </a>`;
+}
+
 function activeWorkout() {
   const id = db.ui().activeWorkoutId;
   const w = id && db.get("workout", id);
@@ -79,6 +98,11 @@ function render() {
   app.className = r.name === "run" ? "run" : "";
   app.innerHTML = fn(r.id);
   if (r.name === "exercise") wireChart();
+  if (r.name === "run" || r.name === "exercise") {
+    const exId = r.name === "exercise" ? r.id : curEntry().e?.exerciseId;
+    const spec = motionFor(db.get("exercise", exId));
+    if (spec) startMovement(app, spec);
+  }
   wakeLock(r.name === "run");
   renderRest();
 }
@@ -99,49 +123,64 @@ function itemLine(it, ex, all) {
 function viewToday() {
   const active = activeWorkout();
   const p = activeProgram();
-  const head = `<header class="top"><div class="grow wordmark">Lift</div>${syncDot()}<a class="icon-btn" href="#/settings" aria-label="Settings">${I.gear}</a></header>${signinBanner()}`;
+  const head = `<header class="top"><div class="grow wordmark"><span class="wm-plate" aria-hidden="true"></span>Lift</div>${syncDot()}<a class="icon-btn" href="#/settings" aria-label="Settings">${I.gear}</a></header>${signinBanner()}`;
   if (!p) return `${head}<div class="empty"><p>No program yet. Ask your coach to write one.</p><a class="btn primary" href="#/coach">Open coach</a></div>${tabs("today")}`;
 
   const pos = blockPosition(p);
   const all = db.list("workout");
   const ex = exById();
-  const blockLine = pos.done
-    ? `<p class="block-line">${esc(p.name)}: finished</p>`
-    : `<p class="block-line"><a href="#/block">${esc(p.name)}</a><br><span class="muted">Week ${pos.week + 1} of ${pos.weeks}, ${PHASE_TEXT[pos.phase].toLowerCase()}</span></p>`;
+  const meter = blockMeter(p, pos);
 
   if (active) {
-    return `${head}${blockLine}<a class="resume" href="#/run"><div class="small">In progress since ${fmtTime(active.startedAt)}</div><h2>Resume ${esc(active.name)}</h2></a>${tabs("today")}`;
+    const hue = hueFor(active.sessionKey, p);
+    const done = active.entries.reduce((a, e) => a + e.sets.filter((x) => x.done).length, 0);
+    const total = active.entries.reduce((a, e) => a + e.sets.length, 0);
+    return `${head}${meter}<a class="hero resume-hero" data-hue="${hue}" href="#/run">
+      <div class="hero-top">${disc(active.sessionKey, hue)}<span>In progress since ${fmtTime(active.startedAt)}</span></div>
+      <h1 class="hero-title">${esc(active.name)}</h1>
+      <p class="hero-meta">${done} of ${total} sets done</p>
+      <span class="btn go block">Resume session</span></a>${tabs("today")}`;
   }
 
   if (pos.done) {
-    return `${head}${blockLine}
-      <div class="today-card"><h2>Block complete</h2>
-        <p class="muted">Six weeks done. Your coach will read your logs and write the next block.</p>
-        <button class="btn primary block" data-act="coach-run" data-trigger="new-block" ${coachBusy ? "disabled" : ""}>${coachBusy ? "Coach is writing…" : "Write my next block"}</button>
-      </div>${tabs("today")}`;
+    return `${head}${meter}
+      <section class="hero" data-hue="green"><h1 class="hero-title">Block complete</h1>
+        <p class="hero-meta">${pos.weeks} weeks done. Your coach will read your logs and write the next block.</p>
+        <button class="btn go block" data-act="coach-run" data-trigger="new-block" ${coachBusy ? "disabled" : ""}>${coachBusy ? "Coach is writing…" : "Write my next block"}</button>
+      </section>${tabs("today")}`;
   }
 
   const n = nextSession(p, all, ex);
   const s = p.sessions.find((x) => x.key === n.key);
+  const hue = hueFor(s.key, p);
   const done = new Set(n.doneThisWeek);
+  const sets = s.items.reduce((a, it) => a + it.sets, 0);
   const phaseNote = {
-    calibration: "This week finds your working weights. Start light and build up each set.",
-    deload: "Lighter week: fewer sets and less weight so you recover before the next block.",
+    calibration: "Calibration week: start light and build up each set to find your working weights.",
+    deload: "Deload week: fewer sets and less weight so you recover before the next block.",
     build: "",
   }[pos.phase];
 
-  return `${head}${blockLine}
-  <section class="today-card" aria-labelledby="today-h">
-    <div class="small muted">${n.extra ? "Bonus session" : "Today"}</div>
-    <h1 id="today-h" class="today-title">${esc(s.name)}</h1>
+  return `${head}${meter}
+  <section class="hero" data-hue="${hue}" aria-labelledby="today-h">
+    <div class="hero-top">${disc(s.key, hue)}<span>${n.extra ? "Bonus session" : weekday()}</span></div>
+    <h1 id="today-h" class="hero-title today-title">${esc(s.name)}</h1>
+    <p class="hero-meta">${s.items.length} exercises, ${sets} sets, about 45 minutes</p>
     ${n.reason ? `<p class="reason">${esc(n.reason)}</p>` : ""}
-    ${phaseNote ? `<p class="small muted" style="margin:.4rem 0 0">${phaseNote}</p>` : ""}
-    <ul class="rows compact">${s.items.map((it) => itemLine(it, ex[it.exerciseId], all)).join("")}</ul>
-    <button class="btn primary block" data-act="begin" data-key="${s.key}">Start ${esc(s.name)}</button>
+    ${phaseNote ? `<p class="hero-note">${phaseNote}</p>` : ""}
+    <ol class="hero-list">${s.items.map((it) => heroItem(it, ex[it.exerciseId], all)).join("")}</ol>
+    <button class="btn go block" data-act="begin" data-key="${s.key}">Start ${esc(s.name)}</button>
   </section>
   <div class="section-head"><h2>This week</h2><span class="muted small">${done.size} of ${p.sessions.length} done</span></div>
-  <ul class="rows">${p.sessions.map((x) => `<li><a href="#/session/${x.key}"><span class="r-main"><span class="r-title">${esc(x.name)}</span><br><span class="r-sub">${esc(x.focus || "")}</span></span><span class="r-side">${done.has(x.key) ? `<span class="done-mark">${I.check}<span class="sr">Done</span></span>` : x.key === n.key ? "Next" : ""}</span></a></li>`).join("")}</ul>
+  <ul class="rows week-rows">${p.sessions.map((x) => `<li><a href="#/session/${x.key}">${disc(x.key, hueFor(x.key, p), done.has(x.key))}<span class="r-main"><span class="r-title">${esc(x.name)}</span><br><span class="r-sub">${esc(x.focus || "")}</span></span><span class="r-side small">${done.has(x.key) ? "Done" : x.key === n.key ? "Next" : ""}</span></a></li>`).join("")}</ul>
   ${tabs("today")}`;
+}
+
+function heroItem(it, ex, all) {
+  const h = history(all, it.exerciseId)[0];
+  const top = h ? Math.max(...h.sets.map((x) => +x.weight || 0)) : 0;
+  const last = h ? (top ? `${fmtKg(top)} kg` : `${Math.max(...h.sets.map((x) => x.reps))} reps`) : "";
+  return `<li><span class="hl-name">${esc(ex?.name ?? "Missing exercise")}${it.role === "rehab" ? ` <span class="tag tag-rehab">Achilles</span>` : ""}</span><span class="hl-sets">${it.sets} × ${repRange(it)}${last ? `<small>last ${last}</small>` : ""}</span></li>`;
 }
 
 function viewSessionPreview(key) {
@@ -150,7 +189,7 @@ function viewSessionPreview(key) {
   if (!s) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><p>Session not found.</p>`;
   const ex = exById(), all = db.list("workout");
   return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a><div class="grow title">${esc(p.name)}</div></header>
-    <h1>${esc(s.name)}</h1><p class="muted" style="margin:.4rem 0 1rem">${esc(s.focus || "")}</p>
+    <div class="title-with-disc">${disc(s.key, hueFor(s.key, p))}<h1>${esc(s.name)}</h1></div><p class="muted" style="margin:.4rem 0 1rem">${esc(s.focus || "")}</p>
     <ul class="rows compact">${s.items.map((it) => itemLine(it, ex[it.exerciseId], all)).join("")}</ul>
     <div style="margin-top:1rem"><button class="btn primary block" data-act="begin" data-key="${s.key}" ${activeWorkout() ? "disabled" : ""}>Start ${esc(s.name)} instead</button></div>
     ${tabs("today")}`;
@@ -356,12 +395,13 @@ function viewRun() {
   return `
   <header class="top">
     <a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a>
-    <div class="grow title">${esc(w.name)}</div>
+    <div class="grow title run-title">${disc(w.sessionKey, hueFor(w.sessionKey))}${esc(w.name)}</div>
     <button class="icon-btn" data-act="run-menu" aria-label="Session options">${I.more}</button>
   </header>
   <div class="seq-strip" role="list" aria-label="Exercises">
     ${w.entries.map((en, i) => `<button role="listitem" data-act="jump" data-i="${i}" data-state="${st(en)}" ${i === idx ? 'aria-current="step"' : ""} aria-label="${esc(en.name)}">${i + 1}</button>`).join("")}
   </div>
+  ${motionFor(ex) ? `<div class="mv-card">${movementHtml(motionFor(ex), e.name)}</div>` : ""}
   <div class="ex-head">
     <h1 class="ex-title">${esc(e.name)}</h1>
     ${e.sets.some((s) => s.done) ? "" : `<button class="btn sm swap-btn" data-act="swap" aria-label="Swap ${esc(e.name)}">${I.swap}Swap</button>`}
@@ -388,17 +428,17 @@ function viewRun() {
       ${["easy", "right", "hard"].map((f) => `<button data-act="feel" data-v="${f}" aria-pressed="${e.feel === f}">${{ easy: "Easy", right: "About right", hard: "Hard" }[f]}</button>`).join("")}
     </div></div>` : ""}
   ${ex ? `<details class="howto" ${db.ui().howtoOpen === false ? "" : "open"}>
-    <summary>How to do it</summary>
+    <summary>Form cues and muscles</summary>
     <div class="howto-body">
       ${bodyMap(ex.muscles || [], ex.secondary || [])}
       ${ex.cues?.length ? `<ul class="cues">${ex.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : `<p class="muted small">No cues yet. Add some on the exercise page.</p>`}
     </div>
   </details>` : ""}
   ${next ? `<div class="up-next"><div class="muted">Up next</div><h3>${esc(next.name)}</h3><div class="small muted">${next.target.sets} × ${repRange(next.target)}${next.sets[0]?.weight ? ` at ${fmtKg(next.sets[0].weight)} kg` : ""}</div></div>` : ""}
-  <div class="run-nav">
+  <div class="run-nav" data-hue="${hueFor(w.sessionKey)}">
     <button class="btn" data-act="jump" data-i="${idx - 1}" ${idx === 0 ? "disabled" : ""}>Previous</button>
-    ${next ? `<button class="btn primary" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
-           : `<button class="btn primary" data-act="finish">Finish session</button>`}
+    ${next ? `<button class="btn go" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
+           : `<button class="btn go" data-act="finish">Finish session</button>`}
   </div>`;
 }
 
@@ -659,7 +699,7 @@ function viewWorkout(id) {
     <div class="grow title">${fmtDate(w.startedAt)}</div>
     <button class="btn sm danger" data-act="delete-workout" data-id="${w.id}">Delete</button>
   </header>
-  <h1>${esc(w.name)}</h1>
+  <div class="title-with-disc">${w.sessionKey ? disc(w.sessionKey, hueFor(w.sessionKey, db.get("program", w.programId))) : ""}<h1>${esc(w.name)}</h1></div>
   <div class="stat-line">
     <div>${w.finishedAt ? fmtDur(w.finishedAt - w.startedAt) : "–"}<small>duration</small></div>
     <div>${sets.length}<small>sets</small></div>
@@ -687,7 +727,7 @@ function viewHistory() {
   <header class="top"><div class="grow"><h1>History</h1></div>${syncDot()}</header>
   ${ws.length ? `<ul class="rows">${ws.map((w) => {
     const sets = w.entries.reduce((a, e) => a + e.sets.length, 0);
-    return `<li><a href="#/workout/${w.id}"><span class="r-main"><span class="r-title">${esc(w.name)}</span><br><span class="r-sub">${fmtDate(w.startedAt)}, ${fmtDur(w.finishedAt - w.startedAt)}</span></span><span class="r-side">${sets} sets</span></a></li>`;
+    return `<li><a href="#/workout/${w.id}">${disc(w.sessionKey ?? "", w.sessionKey ? hueFor(w.sessionKey, db.get("program", w.programId)) : "none")}<span class="r-main"><span class="r-title">${esc(w.name)}</span><br><span class="r-sub">${fmtDate(w.startedAt)}, ${fmtDur(w.finishedAt - w.startedAt)}</span></span><span class="r-side">${sets} sets</span></a></li>`;
   }).join("")}</ul>` : `<div class="empty"><p>Finished sessions show up here.</p><a class="btn primary" href="#/">Go to today</a></div>`}
   ${tabs("history")}`;
 }
@@ -811,6 +851,7 @@ function viewExercise(id) {
       <div id="chart-host"></div>
       <figcaption class="small muted" style="padding:0 .25rem">${weighted ? "Best set each session, converted with the Epley formula. Tap the chart for details." : "Most reps in a set each session."}</figcaption>
     </figure>` : `<p class="muted" style="margin:1rem 0">${chartData.length ? "Log one more session to see a trend." : "No sessions logged yet."}</p>`}
+  ${motionFor(ex) ? `<div class="mv-card">${movementHtml(motionFor(ex), ex.name)}</div>` : ""}
   <div class="howto-body" style="margin:1rem 0">${bodyMap(ex.muscles || [], ex.secondary || [])}
     <label class="field" style="margin:0"><span>Form cues, one per line</span><textarea class="input" data-xfield="cues" rows="4">${esc((ex.cues || []).join("\n"))}</textarea></label></div>
   <div class="field"><span class="small" style="font-weight:600">Equipment</span>
@@ -918,6 +959,7 @@ document.addEventListener("click", async (ev) => {
     case "reload": ev.preventDefault(); location.reload(); return;
     case "signin": ev.preventDefault(); location.href = `/?signin=${Date.now()}${location.hash}`; return;
     case "begin": return beginSession(t.dataset.key);
+    case "mv-toggle": return toggleMovement(t);
     case "swap": return doSwap();
 
     case "jump": {

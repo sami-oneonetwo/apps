@@ -1,10 +1,10 @@
 // Offline support: serve the app from cache, refresh it in the background.
 // /api/* always goes to the network (the app queues changes itself when offline).
 
-const CACHE = "lift-shell-v3";
+const CACHE = "lift-shell-v4";
 const SHELL = [
   "/", "/index.html", "/app.css", "/manifest.webmanifest",
-  "/js/app.js", "/js/store.js", "/js/seed.js", "/js/progression.js", "/js/plates.js", "/js/program.js", "/js/body.js",
+  "/js/app.js", "/js/store.js", "/js/seed.js", "/js/progression.js", "/js/plates.js", "/js/program.js", "/js/body.js", "/js/anim.js", "/js/motions.js",
   "/icons/icon.svg", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png",
 ];
 
