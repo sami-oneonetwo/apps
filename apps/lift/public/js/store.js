@@ -1,10 +1,11 @@
 // Local-first store. Everything lives in localStorage and works offline;
 // changes queue up and sync to the server whenever it can be reached.
 
-import { SEED_EXERCISES, DEFAULT_SETTINGS } from "./seed.js";
+import { SEED_EXERCISES, DEFAULT_SETTINGS, SEED_VERSION } from "./seed.js";
+import { blockOne } from "./program.js";
 
 const KEY = "lift:v1";
-const KINDS = ["exercise", "routine", "workout", "settings"];
+const KINDS = ["exercise", "routine", "workout", "settings", "program", "coachlog"];
 
 let state = load();
 const listeners = new Set();
@@ -51,20 +52,21 @@ export function subscribe(fn) {
 export const uid = (prefix) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+/** Seed the library and Block 1; upgrade seeds you haven't edited when the library changes. */
 export function seedIfEmpty() {
   let changed = false;
-  if (!Object.keys(state.records.exercise).length) {
-    for (const e of SEED_EXERCISES) {
-      state.records.exercise[e.id] = structuredClone(e);
-      state.dirty[`exercise:${e.id}`] = 1;
-    }
-    changed = true;
+  const mark = (kind, rec) => { state.records[kind][rec.id] = structuredClone(rec); state.dirty[`${kind}:${rec.id}`] = 1; changed = true; };
+  for (const e of SEED_EXERCISES) {
+    const cur = state.records.exercise[e.id];
+    if (!cur || (!cur.deleted && (cur.updatedAt || 0) < e.updatedAt)) mark("exercise", e);
   }
-  if (!state.records.settings.main) {
-    state.records.settings.main = structuredClone(DEFAULT_SETTINGS);
-    state.dirty["settings:main"] = 1;
-    changed = true;
+  const st = state.records.settings.main;
+  if (!st) mark("settings", DEFAULT_SETTINGS);
+  else if ((st.updatedAt || 0) < SEED_VERSION) mark("settings", { ...DEFAULT_SETTINGS, barKg: st.barKg ?? DEFAULT_SETTINGS.barKg, plates: st.plates ?? DEFAULT_SETTINGS.plates });
+  else {
+    for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) if (st[k] === undefined) { st[k] = structuredClone(v); changed = true; }
   }
+  if (!Object.keys(state.records.program).length) mark("program", blockOne());
   if (changed) save();
 }
 

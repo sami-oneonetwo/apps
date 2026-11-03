@@ -1,7 +1,9 @@
 import * as db from "./store.js";
-import { MUSCLES, EQUIPMENT, DEFAULT_INCREMENT } from "./seed.js";
-import { history, suggest, trend, e1rm, fmtKg, roundTo } from "./progression.js";
+import { MUSCLES, EQUIPMENT, DEFAULT_INCREMENT, PATTERNS } from "./seed.js";
+import { history, prescribe, trend, e1rm, fmtKg, roundTo } from "./progression.js";
 import { plateSvg } from "./plates.js";
+import { blockPosition, nextSession, setsPerMuscle, weekStart, PHASE_TEXT, WEEK } from "./program.js";
+import { bodyMap } from "./body.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -11,13 +13,13 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const I = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>',
-  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
-  train: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 12h19"/><rect x="5" y="6.5" width="3" height="11" rx="1"/><rect x="16" y="6.5" width="3" height="11" rx="1"/><rect x="2.5" y="9" width="2.5" height="6" rx=".8"/><rect x="19" y="9" width="2.5" height="6" rx=".8"/></svg>',
+  swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>',
+  today: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 12h19"/><rect x="5" y="6.5" width="3" height="11" rx="1"/><rect x="16" y="6.5" width="3" height="11" rx="1"/><rect x="2.5" y="9" width="2.5" height="6" rx=".8"/><rect x="19" y="9" width="2.5" height="6" rx=".8"/></svg>',
+  coach: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
+  progress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
-  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.5" cy="6.5" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="17.5" r="1.2" fill="currentColor"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
 };
 
@@ -25,27 +27,21 @@ const I = {
 const DAY = 86400000;
 const fmtDate = (t) => new Date(t).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
 const fmtShort = (t) => new Date(t).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-function ago(t) {
-  const d = Math.floor((startOfDay(Date.now()) - startOfDay(t)) / DAY);
-  if (d <= 0) return "today";
-  if (d === 1) return "yesterday";
-  if (d < 14) return `${d} days ago`;
-  return fmtShort(t);
-}
-function startOfDay(t) { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); }
+const fmtTime = (t) => new Date(t).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
 const mmss = (s) => `${Math.floor(Math.abs(s) / 60)}:${String(Math.floor(Math.abs(s) % 60)).padStart(2, "0")}`;
 const fmtDur = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 const setsText = (sets) => sets.map((s) => (+s.weight ? `${fmtKg(s.weight)}×${s.reps}` : `${s.reps}`)).join(", ");
 const repRange = (t) => (t.repMin === t.repMax ? `${t.repMin}` : `${t.repMin}–${t.repMax}`);
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 // ---------- data helpers ----------
 const exercises = () => db.list("exercise").sort((a, b) => a.name.localeCompare(b.name));
-const routines = () => db.list("routine").sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+const exById = () => Object.fromEntries(db.list("exercise").map((e) => [e.id, e]));
 const finished = () => db.list("workout").filter((w) => w.finishedAt).sort((a, b) => b.startedAt - a.startedAt);
-const exName = (id) => db.get("exercise", id)?.name ?? "Deleted exercise";
 const isBar = (ex) => ex?.equipment === "barbell";
 const isBodyweight = (ex) => ex?.equipment === "bodyweight";
-const incrementFor = (item, ex) => item?.increment ?? ex?.increment ?? DEFAULT_INCREMENT[ex?.equipment] ?? 2.5;
+const incrementFor = (ex) => ex?.increment ?? DEFAULT_INCREMENT[ex?.equipment] ?? 2.5;
+const activeProgram = () => db.list("program").filter((p) => p.status === "active").sort((a, b) => b.startedAt - a.startedAt)[0] || null;
 
 function activeWorkout() {
   const id = db.ui().activeWorkoutId;
@@ -57,10 +53,10 @@ function activeWorkout() {
 let sheetOpen = false;
 const tabs = (cur) => `
 <nav class="tabs" aria-label="Sections">
-  <a href="#/" ${cur === "train" ? 'aria-current="page"' : ""}>${I.train}Train</a>
+  <a href="#/" ${cur === "today" ? 'aria-current="page"' : ""}>${I.today}Today</a>
+  <a href="#/coach" ${cur === "coach" ? 'aria-current="page"' : ""}>${I.coach}Coach</a>
+  <a href="#/progress" ${cur === "progress" ? 'aria-current="page"' : ""}>${I.progress}Progress</a>
   <a href="#/history" ${cur === "history" ? 'aria-current="page"' : ""}>${I.history}History</a>
-  <a href="#/exercises" ${cur === "exercises" ? 'aria-current="page"' : ""}>${I.list}Exercises</a>
-  <a href="#/settings" ${cur === "settings" ? 'aria-current="page"' : ""}>${I.gear}Settings</a>
 </nav>`;
 
 const SYNC_TEXT = { idle: "Not synced yet", syncing: "Syncing", synced: "Synced", pending: "Changes waiting", offline: "Offline, saved on phone", error: "Sync failed, will retry", signin: "Sign in to sync" };
@@ -70,22 +66,18 @@ const signinBanner = () => db.sync.status === "signin"
 
 function route() {
   const [name, id] = location.hash.replace(/^#\/?/, "").split("/");
-  return { name: name || "train", id };
+  return { name: name || "today", id };
 }
 
 function render() {
   const r = route();
-  const views = { train: viewTrain, routine: viewRoutine, run: viewRun, workout: viewWorkout, history: viewHistory, exercises: viewExercises, exercise: viewExercise, settings: viewSettings };
-  const fn = views[r.name] || viewTrain;
+  const views = { today: viewToday, session: viewSessionPreview, run: viewRun, workout: viewWorkout, history: viewHistory, exercises: viewExercises, exercise: viewExercise, settings: viewSettings, coach: viewCoach, progress: viewProgress, block: viewBlock };
+  const fn = views[r.name] || viewToday;
   app.className = r.name === "run" ? "run" : "";
   app.innerHTML = fn(r.id);
-  after(r);
+  if (r.name === "exercise") wireChart();
   wakeLock(r.name === "run");
   renderRest();
-}
-
-function after(r) {
-  if (r.name === "exercise") wireChart();
 }
 
 function go(hash) {
@@ -93,167 +85,165 @@ function go(hash) {
   else location.hash = hash;
 }
 
-// ---------- Train ----------
-function viewTrain() {
-  const active = activeWorkout();
-  const rs = routines();
-  const ws = finished();
-  const lastDone = (rid) => ws.find((w) => w.routineId === rid);
-
-  const list = rs.length
-    ? rs.map((r) => {
-        const last = lastDone(r.id);
-        const n = r.items?.length || 0;
-        return `<div class="routine-row">
-          <a class="name" href="#/routine/${r.id}"><h2>${esc(r.name)}</h2></a>
-          <button class="btn primary" data-act="start" data-id="${r.id}" ${n && !active ? "" : "disabled"}>Start</button>
-          <div class="meta">${n} exercise${n === 1 ? "" : "s"}${last ? `, last done ${ago(last.startedAt)}` : ", not done yet"}</div>
-        </div>`;
-      }).join("")
-    : `<div class="empty"><p>Build a routine with the exercises, sets and rep ranges you want. Each time you train, Lift suggests what to lift next.</p>
-       <button class="btn primary" data-act="new-routine">Create a routine</button></div>`;
-
-  return `
-  <header class="top"><div class="grow wordmark">Lift</div>${syncDot()}</header>
-  ${signinBanner()}
-  ${active ? `<a class="resume" href="#/run"><div class="small">In progress, started ${new Date(active.startedAt).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}</div><h2>Resume ${esc(active.name)}</h2></a>` : ""}
-  <div class="section-head"><h2>Routines</h2>${rs.length ? `<button class="btn sm" data-act="new-routine">New routine</button>` : ""}</div>
-  ${list}
-  ${tabs("train")}`;
+// ---------- Today ----------
+function itemLine(it, ex, all) {
+  const h = history(all, it.exerciseId)[0];
+  const top = h ? Math.max(...h.sets.map((s) => +s.weight || 0)) : 0;
+  return `<li><span class="r-main"><span class="r-title">${esc(ex?.name ?? "Missing exercise")}</span>${it.role === "rehab" ? ` <span class="tag">Achilles rehab</span>` : ""}<br>
+    <span class="r-sub">${it.sets} × ${repRange(it)}${h ? `, last ${top ? `${fmtKg(top)} kg` : `${Math.max(...h.sets.map((s) => s.reps))} reps`}` : ""}</span></span></li>`;
 }
 
-function startWorkout(routineId) {
-  const r = db.get("routine", routineId);
-  if (!r) return;
+function viewToday() {
+  const active = activeWorkout();
+  const p = activeProgram();
+  const head = `<header class="top"><div class="grow wordmark">Lift</div>${syncDot()}<a class="icon-btn" href="#/settings" aria-label="Settings">${I.gear}</a></header>${signinBanner()}`;
+  if (!p) return `${head}<div class="empty"><p>No program yet. Ask your coach to write one.</p><a class="btn primary" href="#/coach">Open coach</a></div>${tabs("today")}`;
+
+  const pos = blockPosition(p);
   const all = db.list("workout");
-  const entries = (r.items || []).map((it) => {
+  const ex = exById();
+  const blockLine = pos.done
+    ? `<p class="block-line">${esc(p.name)}: finished</p>`
+    : `<p class="block-line"><a href="#/block">${esc(p.name)}</a><br><span class="muted">Week ${pos.week + 1} of ${pos.weeks}, ${PHASE_TEXT[pos.phase].toLowerCase()}</span></p>`;
+
+  if (active) {
+    return `${head}${blockLine}<a class="resume" href="#/run"><div class="small">In progress since ${fmtTime(active.startedAt)}</div><h2>Resume ${esc(active.name)}</h2></a>${tabs("today")}`;
+  }
+
+  if (pos.done) {
+    return `${head}${blockLine}
+      <div class="today-card"><h2>Block complete</h2>
+        <p class="muted">Six weeks done. Your coach will read your logs and write the next block.</p>
+        <button class="btn primary block" data-act="coach-run" data-trigger="new-block" ${coachBusy ? "disabled" : ""}>${coachBusy ? "Coach is writing…" : "Write my next block"}</button>
+      </div>${tabs("today")}`;
+  }
+
+  const n = nextSession(p, all, ex);
+  const s = p.sessions.find((x) => x.key === n.key);
+  const done = new Set(n.doneThisWeek);
+  const phaseNote = {
+    calibration: "This week finds your working weights. Start light and build up each set.",
+    deload: "Lighter week: fewer sets and less weight so you recover before the next block.",
+    build: "",
+  }[pos.phase];
+
+  return `${head}${blockLine}
+  <section class="today-card" aria-labelledby="today-h">
+    <div class="small muted">${n.extra ? "Bonus session" : "Today"}</div>
+    <h1 id="today-h" class="today-title">${esc(s.name)}</h1>
+    ${n.reason ? `<p class="reason">${esc(n.reason)}</p>` : ""}
+    ${phaseNote ? `<p class="small muted" style="margin:.4rem 0 0">${phaseNote}</p>` : ""}
+    <ul class="rows compact">${s.items.map((it) => itemLine(it, ex[it.exerciseId], all)).join("")}</ul>
+    <button class="btn primary block" data-act="begin" data-key="${s.key}">Start ${esc(s.name)}</button>
+  </section>
+  <div class="section-head"><h2>This week</h2><span class="muted small">${done.size} of ${p.sessions.length} done</span></div>
+  <ul class="rows">${p.sessions.map((x) => `<li><a href="#/session/${x.key}"><span class="r-main"><span class="r-title">${esc(x.name)}</span><br><span class="r-sub">${esc(x.focus || "")}</span></span><span class="r-side">${done.has(x.key) ? `<span class="done-mark">${I.check}<span class="sr">Done</span></span>` : x.key === n.key ? "Next" : ""}</span></a></li>`).join("")}</ul>
+  ${tabs("today")}`;
+}
+
+function viewSessionPreview(key) {
+  const p = activeProgram();
+  const s = p?.sessions.find((x) => x.key === key);
+  if (!s) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><p>Session not found.</p>`;
+  const ex = exById(), all = db.list("workout");
+  return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a><div class="grow title">${esc(p.name)}</div></header>
+    <h1>${esc(s.name)}</h1><p class="muted" style="margin:.4rem 0 1rem">${esc(s.focus || "")}</p>
+    <ul class="rows compact">${s.items.map((it) => itemLine(it, ex[it.exerciseId], all)).join("")}</ul>
+    <div style="margin-top:1rem"><button class="btn primary block" data-act="begin" data-key="${s.key}" ${activeWorkout() ? "disabled" : ""}>Start ${esc(s.name)} instead</button></div>
+    ${tabs("today")}`;
+}
+
+function viewBlock() {
+  const p = activeProgram();
+  if (!p) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><p>No active block.</p>`;
+  const pos = blockPosition(p);
+  const ex = exById();
+  return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a><div class="grow title">About this block</div></header>
+    <h1>${esc(p.name)}</h1>
+    <p class="muted" style="margin:.4rem 0 1rem">Started ${fmtDate(p.startedAt)}. Written by ${p.createdBy === "coach" ? "your in-app coach" : "Claude"}.</p>
+    <p class="prose">${esc(p.rationale || "")}</p>
+    <div class="section-head"><h2>Weeks</h2></div>
+    <ol class="weeks">${p.phases.map((ph, i) => `<li ${i === pos.week ? 'aria-current="step"' : ""}><span class="num">${i + 1}</span>${PHASE_TEXT[ph]}</li>`).join("")}</ol>
+    <div class="section-head"><h2>Weekly targets</h2></div>
+    <p class="small muted">Working sets per muscle each week. Priorities: ${esc((p.priorities || []).join(" and "))}.</p>
+    <p class="prose">${Object.entries(p.targets || {}).filter(([, v]) => v > 0).map(([m, v]) => `${m} ${v}`).join(", ")}</p>
+    ${p.sessions.map((s) => `<div class="section-head"><h2>${esc(s.name)}</h2></div><ul class="rows compact">${s.items.map((it) => `<li><span class="r-main"><span class="r-title">${esc(ex[it.exerciseId]?.name ?? it.exerciseId)}</span><br><span class="r-sub">${it.sets} × ${repRange(it)}, rest ${mmss(it.restSec)}${it.note ? `. ${esc(it.note)}` : ""}</span></span></li>`).join("")}</ul>`).join("")}
+    ${tabs("today")}`;
+}
+
+// ---------- starting a session ----------
+async function beginSession(key) {
+  const p = activeProgram();
+  const s = p?.sessions.find((x) => x.key === key);
+  if (!s) return;
+  const hasRehab = s.items.some((it) => it.role === "rehab");
+  let achilles = null;
+  if (hasRehab) {
+    achilles = await achillesSheet();
+    if (achilles === undefined) return; // cancelled
+  }
+  const pos = blockPosition(p);
+  const all = db.list("workout");
+  const prev = finished().find((w) => w.achilles != null);
+  const entries = s.items.map((it) => {
     const ex = db.get("exercise", it.exerciseId);
-    const inc = incrementFor(it, ex);
-    const hist = history(all, it.exerciseId);
-    const s = suggest(hist, it, inc);
-    const weight = isBodyweight(ex) ? (s.weight ?? 0) : s.weight;
-    return {
-      key: it.key, exerciseId: it.exerciseId, name: ex?.name ?? "Exercise",
-      target: { sets: it.sets, repMin: it.repMin, repMax: it.repMax, restSec: it.restSec, increment: inc },
-      advice: { kind: s.kind, text: s.reason },
-      last: hist[0] ? { at: hist[0].workout.startedAt, sets: hist[0].sets.map(({ weight, reps }) => ({ weight, reps })) } : null,
-      sets: Array.from({ length: it.sets }, (_, i) => ({ weight, reps: s.reps[i], done: false })),
-    };
+    return buildEntry(it, ex, all, { phase: pos.phase, achilles: it.role === "rehab" ? achilles : null, prevAchilles: prev?.achilles ?? null });
   });
-  const w = db.put("workout", { id: db.uid("w"), routineId: r.id, name: r.name, startedAt: Date.now(), finishedAt: null, entries, notes: "" });
+  const w = db.put("workout", { id: db.uid("w"), programId: p.id, sessionKey: s.key, week: pos.week, phase: pos.phase, name: s.name, startedAt: Date.now(), finishedAt: null, achilles, entries, note: "", energy: null });
   db.ui({ activeWorkoutId: w.id, runIndex: 0, rest: null });
   go("#/run");
 }
 
-// ---------- Routine editor ----------
-function viewRoutine(id) {
-  const r = db.get("routine", id);
-  if (!r) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><p>This routine was deleted.</p>`;
-  const items = r.items || [];
-  return `
-  <header class="top">
-    <a class="icon-btn" href="#/" aria-label="Back to routines">${I.back}</a>
-    <div class="grow title">Edit routine</div>
-    <button class="btn sm danger" data-act="delete-routine" data-id="${r.id}">Delete</button>
-  </header>
-  <label class="field"><span>Name</span><input class="input big" data-rfield="name" value="${esc(r.name)}" autocomplete="off"></label>
-  <label class="field"><span>Notes</span><textarea class="input" data-rfield="notes" placeholder="Warm-up, cues, anything to remember">${esc(r.notes || "")}</textarea></label>
-  <div class="section-head"><h2>Exercises</h2></div>
-  ${items.map((it, i) => {
-    const ex = db.get("exercise", it.exerciseId);
-    return `<div class="item" data-i="${i}">
-      <div class="item-head">
-        <span class="seq">${i + 1}</span>
-        <button class="ex-name" data-act="swap-ex" data-i="${i}">${esc(ex?.name ?? "Deleted exercise")}</button>
-        <button class="icon-btn" data-act="move" data-i="${i}" data-d="-1" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.up}</button>
-        <button class="icon-btn" data-act="move" data-i="${i}" data-d="1" aria-label="Move down" ${i === items.length - 1 ? "disabled" : ""}>${I.down}</button>
-        <button class="icon-btn" data-act="remove-item" data-i="${i}" aria-label="Remove">${I.x}</button>
-      </div>
-      <div class="item-grid">
-        <label class="mini"><span>Sets</span><input type="number" inputmode="numeric" min="1" max="20" data-ifield="sets" data-i="${i}" value="${it.sets}"></label>
-        <div class="mini"><span>Reps</span><div class="range">
-          <input type="number" inputmode="numeric" min="1" max="100" data-ifield="repMin" data-i="${i}" value="${it.repMin}" aria-label="Lowest reps">
-          <span>–</span>
-          <input type="number" inputmode="numeric" min="1" max="100" data-ifield="repMax" data-i="${i}" value="${it.repMax}" aria-label="Highest reps">
-        </div></div>
-        <label class="mini"><span>Rest (sec)</span><input type="number" inputmode="numeric" min="0" max="900" step="15" data-ifield="restSec" data-i="${i}" value="${it.restSec}"></label>
-      </div>
-    </div>`;
-  }).join("")}
-  <div style="margin-top:1rem"><button class="btn block" data-act="add-item">Add exercise</button></div>
-  ${items.length ? `<div style="margin-top:.75rem"><button class="btn primary block" data-act="start" data-id="${r.id}" ${activeWorkout() ? "disabled" : ""}>Start this routine</button></div>` : ""}
-  ${tabs("train")}`;
-}
-
-function newRoutine() {
-  const r = db.put("routine", { id: db.uid("r"), name: "New routine", notes: "", items: [], order: routines().length });
-  go(`#/routine/${r.id}`);
-  setTimeout(() => { const n = $('[data-rfield="name"]'); n?.focus(); n?.select(); }, 50);
-}
-
-function routineItem(exerciseId) {
-  const ex = db.get("exercise", exerciseId);
-  const heavy = ex?.equipment === "barbell";
-  return { key: db.uid("i"), exerciseId, sets: 3, repMin: heavy ? 5 : 8, repMax: heavy ? 8 : 12, restSec: heavy ? 150 : 90, increment: null };
-}
-
-// ---------- Exercise picker sheet ----------
-function openPicker(onPick, title = "Add exercise") {
-  let q = "";
-  let muscle = null;
-  const root = $("#sheet-root");
-  const draw = () => {
-    const ql = q.trim().toLowerCase();
-    const matches = exercises().filter((e) => (!ql || e.name.toLowerCase().includes(ql)) && (!muscle || e.muscles?.includes(muscle)));
-    const groups = EQUIPMENT.map((eq) => [eq, matches.filter((e) => e.equipment === eq)]).filter(([, l]) => l.length);
-    $("#picker-list").innerHTML = `
-      ${groups.map(([eq, l]) => `<div class="group-label">${eq}</div><ul class="rows">${l.map((e) => `<li><button class="row" data-pick="${e.id}"><span class="r-main"><span class="r-title">${esc(e.name)}</span><br><span class="r-sub">${esc((e.muscles || []).join(", "))}</span></span></button></li>`).join("")}</ul>`).join("")}
-      ${ql ? `<div class="item" style="margin-top:1rem"><p class="small muted" style="margin-bottom:.5rem">Not in the list? Create it.</p>
-        <div style="display:flex;gap:.5rem"><select class="input" id="new-eq" style="flex:1">${EQUIPMENT.map((e) => `<option ${e === "dumbbell" ? "selected" : ""}>${e}</option>`).join("")}</select>
-        <button class="btn primary" data-create>Create “${esc(q.trim())}”</button></div></div>` : ""}
-      ${!groups.length && !ql ? `<p class="muted">No exercises work ${esc(muscle)}. Clear the filter or create one.</p>` : ""}`;
-  };
-  root.innerHTML = `<div class="scrim" data-close></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-    <div style="display:flex;align-items:center;justify-content:space-between"><h2>${esc(title)}</h2><button class="icon-btn" data-close aria-label="Close">${I.x}</button></div>
-    <input class="search" id="picker-q" type="search" placeholder="Search exercises" autocomplete="off">
-    <div class="toggles" style="margin:.75rem 0">${MUSCLES.map((m) => `<button data-muscle="${m}" aria-pressed="false">${m}</button>`).join("")}</div>
-    <div id="picker-list"></div>
-  </div>`;
-  sheetOpen = true;
-  draw();
-  $("#picker-q").addEventListener("input", (e) => { q = e.target.value; draw(); });
-  root.onclick = (e) => {
-    const t = e.target.closest("[data-close],[data-pick],[data-create],[data-muscle]");
-    if (!t) return;
-    if (t.dataset.muscle) {
-      muscle = muscle === t.dataset.muscle ? null : t.dataset.muscle;
-      root.querySelectorAll("[data-muscle]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.muscle === muscle)));
-      draw();
-      return;
-    }
-    if (t.dataset.pick) { closeSheet(); onPick(t.dataset.pick); return; }
-    if ("create" in t.dataset) {
-      const eq = $("#new-eq").value;
-      const ex = db.put("exercise", { id: db.uid("ex"), name: q.trim(), equipment: eq, muscles: muscle ? [muscle] : [], increment: DEFAULT_INCREMENT[eq], notes: "" });
-      closeSheet(); onPick(ex.id); return;
-    }
-    closeSheet();
+function buildEntry(it, ex, all, ctx, extra = {}) {
+  const inc = incrementFor(ex);
+  const hist = history(all, ex?.id);
+  const s = prescribe(hist, it, inc, ctx);
+  const weight = isBodyweight(ex) ? (s.weight ?? 0) : s.weight;
+  return {
+    itemKey: it.key, exerciseId: ex?.id, name: ex?.name ?? "Exercise", role: it.role, note: it.note || "",
+    target: { sets: s.sets, repMin: it.repMin, repMax: it.repMax, restSec: it.restSec, increment: inc },
+    advice: { kind: s.kind, text: s.reason },
+    last: hist[0] ? { at: hist[0].workout.startedAt, sets: hist[0].sets.map(({ weight, reps }) => ({ weight, reps })) } : null,
+    sets: Array.from({ length: s.sets }, (_, i) => ({ weight, reps: !hist.length && ctx.phase === "calibration" && it.role !== "rehab" ? it.repMax : s.reps[i], done: false })),
+    feel: null,
+    ...extra,
   };
 }
 
+function achillesSheet() {
+  return new Promise((resolve) => {
+    const root = $("#sheet-root");
+    root.innerHTML = `<div class="scrim" data-a="cancel"></div>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ach-h">
+        <h2 id="ach-h">Achilles check</h2>
+        <p class="muted">How does it feel right now? 0 is nothing, 10 is the worst it's been. This sets today's calf load.</p>
+        <div class="scale" role="group" aria-label="Achilles score 0 to 10">${Array.from({ length: 11 }, (_, i) => `<button data-a="${i}" class="${i <= 3 ? "ok" : i <= 5 ? "warn" : "bad"}">${i}</button>`).join("")}</div>
+        <div class="scale-legend small muted"><span>Fine</span><span>Careful</span><span>Ease off</span></div>
+        <div class="actions"><button class="btn quiet block" data-a="skip">Skip the check today</button></div>
+      </div>`;
+    sheetOpen = true;
+    root.onclick = (e) => {
+      const v = e.target.closest("[data-a]")?.dataset.a;
+      if (v == null) return;
+      closeSheet();
+      resolve(v === "cancel" ? undefined : v === "skip" ? null : +v);
+    };
+  });
+}
+
+// ---------- generic sheets ----------
 function closeSheet() {
   $("#sheet-root").innerHTML = "";
   $("#sheet-root").onclick = null;
   sheetOpen = false;
 }
 
-function confirmSheet({ title, body, ok, okClass = "primary", cancel = "Cancel", extra }) {
+function confirmSheet({ title, body, ok, okClass = "primary", cancel = "Cancel", extra, extraHtml = "" }) {
   return new Promise((resolve) => {
     const root = $("#sheet-root");
     root.innerHTML = `<div class="scrim" data-v="cancel"></div>
       <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-        <h2>${esc(title)}</h2>${body ? `<p class="muted">${body}</p>` : ""}
+        <h2>${esc(title)}</h2>${body ? `<p class="muted">${body}</p>` : ""}${extraHtml}
         <div class="actions">
           <button class="btn ${okClass} block" data-v="ok">${esc(ok)}</button>
           ${extra ? `<button class="btn danger block" data-v="extra">${esc(extra)}</button>` : ""}
@@ -261,64 +251,157 @@ function confirmSheet({ title, body, ok, okClass = "primary", cancel = "Cancel",
         </div></div>`;
     sheetOpen = true;
     root.onclick = (e) => {
-      const v = e.target.closest("[data-v]")?.dataset.v;
-      if (!v) return;
+      const t = e.target.closest("[data-v],[data-energy]");
+      if (!t) return;
+      if (t.dataset.energy) {
+        root.querySelectorAll("[data-energy]").forEach((b) => b.setAttribute("aria-pressed", String(b === t)));
+        return;
+      }
+      const v = t.dataset.v;
+      const note = $("#finish-note", root)?.value ?? null;
+      const energy = +($('[data-energy][aria-pressed="true"]', root)?.dataset.energy || 0) || null;
       closeSheet();
-      resolve(v);
+      resolve({ v, note, energy });
     };
-    $('[data-v="ok"]', root).focus();
   });
+}
+
+// ---------- swap ----------
+function swapSheet(entry, isRehab) {
+  return new Promise((resolve) => {
+    const cur = db.get("exercise", entry.exerciseId);
+    const pattern = cur?.pattern;
+    let showAll = false;
+    const root = $("#sheet-root");
+    const draw = () => {
+      const opts = exercises().filter((e) => e.id !== entry.exerciseId && (isRehab ? e.pattern === "calf-bent-knee" : showAll || e.pattern === pattern));
+      $("#swap-list", root).innerHTML = opts.length
+        ? `<ul class="rows">${opts.map((e) => `<li><button class="row" data-pick="${e.id}"><span class="r-main"><span class="r-title">${esc(e.name)}</span><br><span class="r-sub">${esc([e.equipment, ...(e.muscles || [])].join(", "))}</span></span></button></li>`).join("")}</ul>`
+        : `<p class="muted">No other ${esc(PATTERNS[pattern] || "matching")} exercises in your library.</p>`;
+    };
+    root.innerHTML = `<div class="scrim" data-close></div>
+      <div class="sheet" role="dialog" aria-modal="true" aria-label="Swap exercise">
+        <div style="display:flex;align-items:center;justify-content:space-between"><h2>Swap ${esc(entry.name)}</h2><button class="icon-btn" data-close aria-label="Close">${I.x}</button></div>
+        <p class="muted small">${isRehab ? "Your physio asked for bent-knee calf raises, so only those are offered." : `Same movement (${esc(PATTERNS[pattern] || "similar")}), so the program stays on track.`}</p>
+        <div id="swap-list"></div>
+        ${isRehab ? "" : `<button class="btn quiet block" data-all>Show every exercise</button>`}
+        <div id="swap-when" hidden>
+          <h3 style="margin-top:1rem">For how long?</h3>
+          <div class="actions">
+            <button class="btn primary block" data-when="today">Just today</button>
+            <button class="btn block" data-when="block">For the rest of this block</button>
+          </div>
+        </div>
+      </div>`;
+    sheetOpen = true;
+    draw();
+    let picked = null;
+    root.onclick = (e) => {
+      const t = e.target.closest("[data-close],[data-pick],[data-all],[data-when]");
+      if (!t) return;
+      if ("all" in t.dataset) { showAll = true; t.remove(); draw(); return; }
+      if (t.dataset.pick) {
+        picked = t.dataset.pick;
+        root.querySelectorAll("[data-pick]").forEach((b) => b.classList.toggle("picked", b.dataset.pick === picked));
+        $("#swap-when", root).hidden = false;
+        $("#swap-when", root).scrollIntoView({ block: "nearest" });
+        return;
+      }
+      if (t.dataset.when && picked) { closeSheet(); resolve({ exerciseId: picked, when: t.dataset.when }); return; }
+      closeSheet();
+      resolve(null);
+    };
+  });
+}
+
+async function doSwap() {
+  const { w, idx, e } = curEntry();
+  if (!e || e.sets.some((s) => s.done)) return;
+  const res = await swapSheet(e, e.role === "rehab");
+  if (!res) return;
+  const ex = db.get("exercise", res.exerciseId);
+  const p = db.get("program", w.programId);
+  const item = p?.sessions.find((s) => s.key === w.sessionKey)?.items.find((it) => it.key === e.itemKey)
+    || { key: e.itemKey, sets: e.target.sets, repMin: e.target.repMin, repMax: e.target.repMax, restSec: e.target.restSec, role: e.role, note: e.note };
+  const all = db.list("workout");
+  w.entries[idx] = buildEntry(item, ex, all, { phase: w.phase, achilles: e.role === "rehab" ? w.achilles : null }, { swappedFrom: e.swappedFrom || e.exerciseId });
+  db.put("workout", w);
+  if (res.when === "block" && p) {
+    for (const s of p.sessions) for (const it of s.items) if (it.exerciseId === e.exerciseId || it.exerciseId === e.swappedFrom) it.exerciseId = ex.id;
+    db.put("program", p);
+    toast(`${ex.name} for the rest of the block`);
+  } else toast(`${ex.name} for today`);
+  render();
 }
 
 // ---------- Runner ----------
 function viewRun() {
   const w = activeWorkout();
-  if (!w) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><div class="empty"><p>No workout in progress.</p><a class="btn primary" href="#/">Choose a routine</a></div>`;
+  if (!w) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><div class="empty"><p>No session in progress.</p><a class="btn primary" href="#/">Go to today</a></div>`;
   const n = w.entries.length;
   const idx = Math.min(db.ui().runIndex || 0, Math.max(0, n - 1));
-  if (!n) return `<header class="top"><a class="icon-btn" href="#/">${I.back}</a></header><p>This routine has no exercises.</p>`;
   const e = w.entries[idx];
   const ex = db.get("exercise", e.exerciseId);
   const t = e.target;
   const next = w.entries[idx + 1];
+  const cfg = db.settings();
   const st = (en) => { const d = en.sets.filter((s) => s.done).length; return d === 0 ? "none" : d >= en.sets.length ? "done" : "part"; };
+  const allDone = e.sets.length && e.sets.every((s) => s.done);
+  const askFeel = allDone && (w.phase === "calibration" || cfg.track?.feelAlways) && e.role !== "rehab";
+  const calfTarget = e.role === "rehab" && cfg.bodyweightKg ? `<p class="small muted">Physio target: work up to your bodyweight, ${fmtKg(cfg.bodyweightKg)} kg.</p>` : "";
 
   return `
   <header class="top">
-    <a class="icon-btn" href="#/" aria-label="Back to routines">${I.back}</a>
+    <a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a>
     <div class="grow title">${esc(w.name)}</div>
-    <button class="icon-btn" data-act="run-menu" aria-label="Workout options">${I.more}</button>
+    <button class="icon-btn" data-act="run-menu" aria-label="Session options">${I.more}</button>
   </header>
   <div class="seq-strip" role="list" aria-label="Exercises">
     ${w.entries.map((en, i) => `<button role="listitem" data-act="jump" data-i="${i}" data-state="${st(en)}" ${i === idx ? 'aria-current="step"' : ""} aria-label="${esc(en.name)}">${i + 1}</button>`).join("")}
   </div>
-  <h1 class="ex-title">${esc(e.name)}</h1>
-  <div class="chips">${(ex?.muscles || []).map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>
+  <div class="ex-head">
+    <h1 class="ex-title">${esc(e.name)}</h1>
+    ${e.sets.some((s) => s.done) ? "" : `<button class="btn sm swap-btn" data-act="swap" aria-label="Swap ${esc(e.name)}">${I.swap}Swap</button>`}
+  </div>
+  ${e.role === "rehab" ? `<p class="tag-line"><span class="tag">Achilles rehab</span>${w.achilles != null ? ` Achilles today: ${w.achilles}/10` : ""}</p>` : ""}
+  ${e.swappedFrom ? `<p class="small muted">Swapped in for ${esc(db.get("exercise", e.swappedFrom)?.name ?? "the planned exercise")}.</p>` : ""}
   <div class="target">
     <span>${t.sets} × ${repRange(t)}<small>sets × reps</small></span>
     <span>${mmss(t.restSec)}<small>rest</small></span>
   </div>
-  <div class="advice" data-kind="${e.advice.kind}">${esc(e.advice.text)}</div>
+  <div class="advice" data-kind="${e.advice.kind}">${esc(e.advice.text)}${e.note ? `<br><span class="small">${esc(e.note)}</span>` : ""}</div>
+  ${calfTarget}
   ${isBar(ex) ? `<div class="loadout" id="loadout">${loadoutHtml(e)}</div>` : ""}
   ${e.last ? `<p class="last">Last time, ${fmtShort(e.last.at)}: ${setsText(e.last.sets)}</p>` : ""}
   <div class="sets">
     <div class="set-head"><span></span><span>${isBodyweight(ex) ? "Added kg" : "kg"}</span><span>Reps</span><span></span></div>
-    ${e.sets.map((s, si) => setRow(s, si, ex)).join("")}
+    ${e.sets.map((s, si) => setRow(s, si, ex, cfg)).join("")}
   </div>
   <div style="display:flex;gap:.5rem;margin-top:.5rem">
     <button class="btn sm" data-act="add-set">Add set</button>
     ${e.sets.length > 1 ? `<button class="btn sm quiet" data-act="remove-set">Remove last set</button>` : ""}
   </div>
+  ${askFeel ? `<div class="feel" role="group" aria-label="How did ${esc(e.name)} feel?"><p>How did that feel?</p><div class="feel-btns">
+      ${["easy", "right", "hard"].map((f) => `<button data-act="feel" data-v="${f}" aria-pressed="${e.feel === f}">${{ easy: "Easy", right: "About right", hard: "Hard" }[f]}</button>`).join("")}
+    </div></div>` : ""}
+  ${ex ? `<details class="howto" ${db.ui().howtoOpen === false ? "" : "open"}>
+    <summary>How to do it</summary>
+    <div class="howto-body">
+      ${bodyMap(ex.muscles || [], ex.secondary || [])}
+      ${ex.cues?.length ? `<ul class="cues">${ex.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : `<p class="muted small">No cues yet. Add some on the exercise page.</p>`}
+    </div>
+  </details>` : ""}
   ${next ? `<div class="up-next"><div class="muted">Up next</div><h3>${esc(next.name)}</h3><div class="small muted">${next.target.sets} × ${repRange(next.target)}${next.sets[0]?.weight ? ` at ${fmtKg(next.sets[0].weight)} kg` : ""}</div></div>` : ""}
   <div class="run-nav">
     <button class="btn" data-act="jump" data-i="${idx - 1}" ${idx === 0 ? "disabled" : ""}>Previous</button>
     ${next ? `<button class="btn primary" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
-           : `<button class="btn primary" data-act="finish">Finish workout</button>`}
+           : `<button class="btn primary" data-act="finish">Finish session</button>`}
   </div>`;
 }
 
-function setRow(s, si, ex) {
-  const step = incrementFor(null, ex) || 1;
+function setRow(s, si, ex, cfg) {
+  const step = incrementFor(ex) || 1;
+  const effort = cfg.track?.effortPerSet ? `<div class="effort" role="group" aria-label="Reps left in set ${si + 1}"><span class="small muted">Reps left</span>${[0, 1, 2, 3].map((r) => `<button data-act="rir" data-si="${si}" data-v="${r}" aria-pressed="${s.rir === r}">${r === 3 ? "3+" : r}</button>`).join("")}</div>` : "";
   return `<div class="set ${s.done ? "done" : ""}" data-si="${si}">
     <span class="idx">${si + 1}</span>
     <div class="stepper">
@@ -332,7 +415,7 @@ function setRow(s, si, ex) {
       <button data-act="step" data-f="reps" data-si="${si}" data-d="1" aria-label="More reps" tabindex="-1">+</button>
     </div>
     <button class="tick" data-act="tick" data-si="${si}" aria-pressed="${s.done}" aria-label="${s.done ? "Undo" : "Done"} set ${si + 1}">${I.check}</button>
-  </div>`;
+  </div>${s.done ? effort : ""}`;
 }
 
 function loadoutHtml(e) {
@@ -355,36 +438,41 @@ function curEntry() {
   return { w, idx, e: w.entries[idx] };
 }
 
-function saveWorkout(w) { db.put("workout", w); }
-
 async function finishWorkout() {
   const w = activeWorkout();
   if (!w) return;
   const open = w.entries.reduce((a, e) => a + e.sets.filter((s) => !s.done).length, 0);
   const done = w.entries.reduce((a, e) => a + e.sets.filter((s) => s.done).length, 0);
   if (!done) {
-    const v = await confirmSheet({ title: "No sets ticked yet", body: "Tick the sets you've done, or discard this workout.", ok: "Keep going", extra: "Discard workout", cancel: "Cancel" });
+    const { v } = await confirmSheet({ title: "No sets ticked yet", body: "Tick the sets you've done, or discard this session.", ok: "Keep going", extra: "Discard session", cancel: "Cancel" });
     if (v === "extra") discardWorkout(w);
     return;
   }
-  const v = await confirmSheet({
-    title: "Finish workout?",
-    body: open ? `${open} set${open === 1 ? " isn't" : "s aren't"} ticked and won't be saved.` : "Every set is ticked.",
-    ok: "Finish workout", cancel: "Keep going",
+  const cfg = db.settings();
+  const notes = cfg.track?.sessionNotes ? `
+    <label class="field"><span>Notes (optional)</span><textarea class="input" id="finish-note" placeholder="Anything worth remembering"></textarea></label>
+    <div class="field"><span class="small" style="font-weight:600">Energy today</span><div class="toggles" style="margin-top:.35rem">${[1, 2, 3, 4, 5].map((n) => `<button data-energy="${n}" aria-pressed="false">${n}</button>`).join("")}</div></div>` : "";
+  const { v, note, energy } = await confirmSheet({
+    title: "Finish session?",
+    body: open ? `${plural(open, "set")} ${open === 1 ? "isn't" : "aren't"} ticked and won't be saved.` : "Every set is ticked.",
+    ok: "Finish session", cancel: "Keep going", extraHtml: notes,
   });
   if (v !== "ok") return;
   w.finishedAt = Date.now();
+  if (note) w.note = note;
+  if (energy) w.energy = energy;
   w.entries = w.entries.map((e) => ({ ...e, sets: e.sets.filter((s) => s.done) })).filter((e) => e.sets.length);
-  saveWorkout(w);
-  db.ui({ activeWorkoutId: null, rest: null, runIndex: 0 });
+  db.put("workout", w);
+  db.ui({ activeWorkoutId: null, rest: null, runIndex: 0, pendingCoach: w.id });
   go(`#/workout/${w.id}`);
+  maybeRunPendingCoach();
 }
 
 function discardWorkout(w) {
   db.remove("workout", w.id);
   db.ui({ activeWorkoutId: null, rest: null, runIndex: 0 });
   go("#/");
-  toast("Workout discarded");
+  toast("Session discarded");
 }
 
 // ---------- Rest timer ----------
@@ -442,7 +530,7 @@ function renderRest() {
   restTimer = setInterval(tick, 250);
 }
 
-// ---------- Wake lock (keep the screen on mid-workout) ----------
+// ---------- Wake lock ----------
 let lock = null;
 async function wakeLock(on) {
   try {
@@ -456,6 +544,94 @@ async function wakeLock(on) {
 }
 document.addEventListener("visibilitychange", () => { if (route().name === "run") wakeLock(true); });
 
+// ---------- Coach ----------
+let coachBusy = null;      // trigger currently running
+let coachError = null;     // { message, noKey }
+let coachInfo = { available: null };
+
+async function callCoach(trigger, message = "") {
+  if (coachBusy) return null;
+  coachBusy = trigger; coachError = null; render();
+  try {
+    await db.runSync();
+    const res = await fetch("/api/coach", {
+      method: "POST", headers: { "content-type": "application/json" }, redirect: "manual",
+      body: JSON.stringify({ trigger, message }),
+    });
+    if (res.type === "opaqueredirect" || res.status === 401) throw Object.assign(new Error("Your sign-in has expired. Reload to sign in again."), {});
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 503 && body.error === "no_key") { coachInfo.available = false; throw Object.assign(new Error(body.message), { noKey: true }); }
+    if (!res.ok) throw new Error(body.message || `The coach couldn't answer (${res.status}).`);
+    await db.runSync();
+    return body.log;
+  } catch (e) {
+    coachError = { message: e.message || "The coach couldn't be reached.", noKey: !!e.noKey };
+    return null;
+  } finally {
+    coachBusy = null; render();
+  }
+}
+
+let autoTriedFor = null;
+/** Review the last finished session once it can reach the server. One automatic try per session. */
+async function maybeRunPendingCoach() {
+  const id = db.ui().pendingCoach;
+  if (!id || coachBusy || !navigator.onLine || coachInfo.available === false || autoTriedFor === id) return;
+  autoTriedFor = id;
+  lastCoachRequest = { trigger: "session", message: "" };
+  const log = await callCoach("session");
+  if (log || coachError?.noKey) db.ui({ pendingCoach: null });
+  else if (!navigator.onLine) autoTriedFor = null; // went offline mid-call: try again when back
+}
+
+function undoCoach(log) {
+  const b = log.before;
+  if (!b) return;
+  if (b.newProgramId) db.remove("program", b.newProgramId);
+  for (const p of b.programs || []) db.put("program", { ...p, status: "active" });
+  db.put("coachlog", { ...log, undone: true });
+  toast("Undone");
+}
+
+function logCard(l, { compact = false } = {}) {
+  return `<article class="log ${l.undone ? "undone" : ""}">
+    <div class="log-head"><span class="small muted">${fmtDate(l.at)}, ${fmtTime(l.at)}${l.trigger === "ask" ? "" : l.trigger === "new-block" ? ", new block" : ", after your session"}</span>
+      ${l.before && !l.undone ? `<button class="btn sm quiet" data-act="undo-coach" data-id="${l.id}">Undo</button>` : l.undone ? `<span class="small muted">Undone</span>` : ""}</div>
+    ${l.request ? `<p class="you">“${esc(l.request)}”</p>` : ""}
+    ${l.message ? `<p class="coach-msg">${esc(l.message)}</p>` : ""}
+    ${l.changes?.length ? `<ul class="changes">${l.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : compact ? "" : `<p class="small muted">${esc(l.summary || "No changes")}</p>`}
+    ${l.skipped?.length && !compact ? `<details class="small muted"><summary>${plural(l.skipped.length, "suggestion")} not applied</summary><ul>${l.skipped.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></details>` : ""}
+  </article>`;
+}
+
+function coachStatus() {
+  if (coachBusy) return `<div class="coach-busy" role="status"><span class="spinner" aria-hidden="true"></span>${coachBusy === "session" ? "Coach is reviewing your session…" : coachBusy === "new-block" ? "Coach is writing your next block. This can take a minute…" : "Coach is thinking…"}</div>`;
+  if (coachError) return coachError.noKey
+    ? `<div class="banner">The coach isn't switched on yet. Add an <strong>ANTHROPIC_API_KEY</strong> secret to the Worker (see the app README), then try again.</div>`
+    : `<div class="banner">${esc(coachError.message)} <button class="btn sm" data-act="coach-retry">Try again</button></div>`;
+  return "";
+}
+
+let lastCoachRequest = null;
+function viewCoach() {
+  const logs = db.list("coachlog").sort((a, b) => b.at - a.at);
+  return `
+  <header class="top"><div class="grow"><h1>Coach</h1></div>${syncDot()}</header>
+  ${signinBanner()}
+  <form class="ask" data-form="ask">
+    <label for="ask-q" class="small" style="font-weight:600">Ask or tell your coach</label>
+    <textarea id="ask-q" class="input" rows="3" placeholder="e.g. Achilles is sore after a long run, only have 30 minutes today, the cable station is always busy…"></textarea>
+    <div class="ask-row">
+      <button class="btn primary" type="submit" ${coachBusy ? "disabled" : ""}>Send</button>
+      <button class="btn quiet" type="button" data-act="coach-run" data-trigger="new-block" ${coachBusy ? "disabled" : ""}>Write a new block</button>
+    </div>
+  </form>
+  ${coachStatus()}
+  <p class="small muted" style="margin:.75rem 0">Your coach reviews each session when you finish and changes the plan when it needs to. Every change has a reason, and you can undo it.</p>
+  ${logs.length ? logs.map((l) => logCard(l)).join("") : `<p class="muted">Nothing yet. Finish a session or ask a question.</p>`}
+  ${tabs("coach")}`;
+}
+
 // ---------- Workout detail ----------
 function bestBefore(exerciseId, before) {
   let best = 0;
@@ -468,9 +644,11 @@ function bestBefore(exerciseId, before) {
 
 function viewWorkout(id) {
   const w = db.get("workout", id);
-  if (!w) return `<header class="top"><a class="icon-btn" href="#/history" aria-label="Back">${I.back}</a></header><p>This workout was deleted.</p>`;
+  if (!w) return `<header class="top"><a class="icon-btn" href="#/history" aria-label="Back">${I.back}</a></header><p>This session was deleted.</p>`;
   const sets = w.entries.flatMap((e) => e.sets);
   const vol = sets.reduce((a, s) => a + (+s.weight || 0) * (s.reps || 0), 0);
+  const log = db.list("coachlog").filter((l) => l.trigger === "session" && l.at >= w.finishedAt).sort((a, b) => a.at - b.at)[0];
+  const justNow = db.ui().pendingCoach === w.id || (Date.now() - w.finishedAt < 15 * 60e3);
   return `
   <header class="top">
     <a class="icon-btn" href="#/history" aria-label="Back to history">${I.back}</a>
@@ -482,13 +660,16 @@ function viewWorkout(id) {
     <div>${w.finishedAt ? fmtDur(w.finishedAt - w.startedAt) : "–"}<small>duration</small></div>
     <div>${sets.length}<small>sets</small></div>
     <div>${Math.round(vol).toLocaleString("en-AU")}<small>kg lifted</small></div>
+    ${w.achilles != null ? `<div>${w.achilles}/10<small>Achilles</small></div>` : ""}
   </div>
+  ${justNow || log ? `<section class="coach-on-workout"><h2>Coach</h2>${log ? logCard(log, { compact: true }) : coachStatus() || `<p class="muted small">Your coach reviews this session when you're back online.</p>`}</section>` : ""}
+  ${w.note ? `<p class="prose">“${esc(w.note)}”</p>` : ""}
   ${w.entries.map((e) => {
     const best = Math.max(...e.sets.map((s) => e1rm(+s.weight || 0, s.reps)));
     const prev = bestBefore(e.exerciseId, w.startedAt);
     const pr = best > 0 && prev > 0 && best > prev + 0.01;
     return `<div class="wo-ex">
-      <h3><a href="#/exercise/${e.exerciseId}" style="text-decoration:none">${esc(e.name)}</a>${pr ? `<span class="badge">New best</span>` : ""}</h3>
+      <h3><a href="#/exercise/${e.exerciseId}" style="text-decoration:none">${esc(e.name)}</a>${pr ? `<span class="badge">New best</span>` : ""}${e.feel ? `<span class="small muted" style="font-family:var(--text);font-weight:400">felt ${e.feel === "right" ? "about right" : e.feel}</span>` : ""}</h3>
       <div class="wo-sets">${e.sets.map((s) => `<span>${+s.weight ? `${fmtKg(s.weight)} kg × ${s.reps}` : `${s.reps} reps`}</span>`).join("")}</div>
     </div>`;
   }).join("")}
@@ -503,8 +684,90 @@ function viewHistory() {
   ${ws.length ? `<ul class="rows">${ws.map((w) => {
     const sets = w.entries.reduce((a, e) => a + e.sets.length, 0);
     return `<li><a href="#/workout/${w.id}"><span class="r-main"><span class="r-title">${esc(w.name)}</span><br><span class="r-sub">${fmtDate(w.startedAt)}, ${fmtDur(w.finishedAt - w.startedAt)}</span></span><span class="r-side">${sets} sets</span></a></li>`;
-  }).join("")}</ul>` : `<div class="empty"><p>Finished workouts show up here.</p><a class="btn primary" href="#/">Start a workout</a></div>`}
+  }).join("")}</ul>` : `<div class="empty"><p>Finished sessions show up here.</p><a class="btn primary" href="#/">Go to today</a></div>`}
   ${tabs("history")}`;
+}
+
+// ---------- Progress ----------
+function personalBests(ws, limit = 8) {
+  const chron = [...ws].sort((a, b) => a.startedAt - b.startedAt);
+  const best = {};
+  const out = [];
+  for (const w of chron) {
+    for (const e of w.entries) {
+      for (const s of e.sets) {
+        const v = e1rm(+s.weight || 0, s.reps);
+        if (!v) continue;
+        if (best[e.exerciseId] && v > best[e.exerciseId] + 0.01) out.push({ at: w.startedAt, name: e.name, exerciseId: e.exerciseId, weight: +s.weight, reps: s.reps, est: v, wid: w.id });
+        best[e.exerciseId] = Math.max(best[e.exerciseId] || 0, v);
+      }
+    }
+  }
+  const dedup = [];
+  const seen = new Set();
+  for (const p of out.reverse()) { const k = p.wid + p.exerciseId; if (!seen.has(k)) { seen.add(k); dedup.push(p); } }
+  return dedup.slice(0, limit);
+}
+
+function viewProgress() {
+  const p = activeProgram();
+  const ws = finished();
+  const ex = exById();
+  const thisWeek = weekStart(Date.now());
+  const now = setsPerMuscle(ws, ex, thisWeek, thisWeek + WEEK);
+  const last = setsPerMuscle(ws, ex, thisWeek - WEEK, thisWeek);
+  const targets = p?.targets || {};
+  const pri = new Set(p?.priorities || []);
+  const muscles = MUSCLES.filter((m) => (targets[m] || 0) > 0).sort((a, b) => (pri.has(b) - pri.has(a)) || targets[b] - targets[a]);
+  const fmt1 = (v) => (Math.round(v * 2) / 2).toString();
+
+  const volume = muscles.map((m) => {
+    const v = now[m] || 0, t = targets[m];
+    const pct = Math.min(130, (v / t) * 100);
+    return `<li class="vol">
+      <div class="vol-label"><span>${esc(m)}${pri.has(m) ? ` <span class="tag">Priority</span>` : ""}</span><span><span class="num">${fmt1(v)}</span> <span class="muted small">of ${t}, last week ${fmt1(last[m] || 0)}</span></span></div>
+      <div class="vol-track" aria-hidden="true"><div class="vol-bar ${v >= t ? "met" : ""}" style="width:${(pct / 130) * 100}%"></div><div class="vol-target" style="left:${(100 / 130) * 100}%"></div></div>
+    </li>`;
+  }).join("");
+
+  // consistency: last 8 weeks
+  const weeks = Array.from({ length: 8 }, (_, i) => thisWeek - (7 - i) * WEEK);
+  const counts = weeks.map((s) => ws.filter((w) => w.startedAt >= s && w.startedAt < s + WEEK).length);
+  const goal = p?.sessions.length || 3;
+  const maxC = Math.max(goal, ...counts);
+  const W = 320, H = 120, L = 6, Bm = 20, bw = (W - L * 2) / 8;
+  const y = (c) => H - Bm - (c / maxC) * (H - Bm - 10);
+  const consistency = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sessions per week for the last 8 weeks: ${counts.join(", ")}">
+    <line x1="${L}" x2="${W - L}" y1="${y(goal)}" y2="${y(goal)}" class="goal-line"/>
+    ${counts.map((c, i) => `<g><title>Week of ${fmtShort(weeks[i])}: ${plural(c, "session")}</title>
+      <rect x="${L + i * bw + 5}" y="${y(c)}" width="${bw - 10}" height="${Math.max(0, H - Bm - y(c))}" rx="4" class="${i === 7 ? "bar-now" : "bar"}"/>
+      <text x="${L + i * bw + bw / 2}" y="${y(c) - 4}" text-anchor="middle" class="bar-num">${c || ""}</text>
+      <text x="${L + i * bw + bw / 2}" y="${H - 5}" text-anchor="middle" class="bar-x">${i === 7 ? "Now" : i === 0 || new Date(weeks[i]).getMonth() !== new Date(weeks[i - 1]).getMonth() ? fmtShort(weeks[i]) : new Date(weeks[i]).getDate()}</text></g>`).join("")}
+  </svg>`;
+
+  const pbs = personalBests(ws);
+  const mains = p ? [...new Set(p.sessions.flatMap((s) => s.items.filter((it) => it.role === "main").map((it) => it.exerciseId)))] : [];
+  const mainRows = mains.map((id) => {
+    const t = trend(history(ws, id));
+    if (!t.length) return `<li><a href="#/exercise/${id}"><span class="r-main"><span class="r-title">${esc(ex[id]?.name ?? id)}</span><br><span class="r-sub">Not logged yet</span></span></a></li>`;
+    const first = t[0].best, lastV = t[t.length - 1].best;
+    const diff = lastV - first;
+    return `<li><a href="#/exercise/${id}"><span class="r-main"><span class="r-title">${esc(ex[id]?.name ?? id)}</span><br><span class="r-sub">${plural(t.length, "session")}${t.length > 1 ? `, ${diff >= 0 ? "+" : "−"}${fmtKg(roundTo(Math.abs(diff), 0.5))} kg since first` : ""}</span></span><span class="r-side">${fmtKg(roundTo(lastV, 0.5))} kg</span></a></li>`;
+  }).join("");
+
+  return `
+  <header class="top"><div class="grow"><h1>Progress</h1></div></header>
+  <section><div class="section-head"><h2>Sets this week</h2><span class="small muted">vs block targets</span></div>
+    ${muscles.length ? `<ul class="vols">${volume}</ul><p class="small muted">Main muscles count a full set, helpers half. The line marks the weekly target.</p>` : `<p class="muted">No block targets yet.</p>`}
+  </section>
+  <section><div class="section-head"><h2>Consistency</h2><span class="small muted">sessions per week, goal ${goal}</span></div>
+    <div class="chart">${consistency}</div></section>
+  <section><div class="section-head"><h2>Main lifts</h2><span class="small muted">estimated 1-rep max</span></div>
+    ${mainRows ? `<ul class="rows">${mainRows}</ul>` : `<p class="muted">No main lifts in this block.</p>`}</section>
+  <section><div class="section-head"><h2>Personal bests</h2></div>
+    ${pbs.length ? `<ul class="rows">${pbs.map((b) => `<li><a href="#/workout/${b.wid}"><span class="r-main"><span class="r-title">${esc(b.name)}</span><br><span class="r-sub">${fmtDate(b.at)}: ${b.weight ? `${fmtKg(b.weight)} kg × ${b.reps}` : `${b.reps} reps`}</span></span><span class="r-side">${fmtKg(roundTo(b.est, 0.5))} kg</span></a></li>`).join("")}</ul>` : `<p class="muted">New bests show up here once you beat a previous session.</p>`}</section>
+  <p style="margin-top:1.5rem"><a class="btn block" href="#/exercises">All exercises</a></p>
+  ${tabs("progress")}`;
 }
 
 // ---------- Exercises ----------
@@ -515,14 +778,14 @@ function viewExercises() {
   const list = exercises().filter((e) => !ql || e.name.toLowerCase().includes(ql) || e.muscles?.some((m) => m.includes(ql)));
   const groups = EQUIPMENT.map((eq) => [eq, list.filter((e) => e.equipment === eq)]).filter(([, l]) => l.length);
   return `
-  <header class="top"><div class="grow"><h1>Exercises</h1></div><button class="btn sm" data-act="new-exercise">New exercise</button></header>
+  <header class="top"><a class="icon-btn" href="#/progress" aria-label="Back to progress">${I.back}</a><div class="grow"><h1>Exercises</h1></div><button class="btn sm" data-act="new-exercise">New exercise</button></header>
   <input class="search" id="ex-q" type="search" placeholder="Search by name or muscle" value="${esc(exQuery)}" autocomplete="off">
   <div id="ex-list">${groups.map(([eq, l]) => `<div class="group-label">${eq}</div><ul class="rows">${l.map((e) => {
     const h = history(all, e.id)[0];
     const top = h ? Math.max(...h.sets.map((s) => +s.weight || 0)) : null;
     return `<li><a href="#/exercise/${e.id}"><span class="r-main"><span class="r-title">${esc(e.name)}</span><br><span class="r-sub">${esc((e.muscles || []).join(", "))}</span></span><span class="r-side">${h ? (top ? `${fmtKg(top)} kg` : `${Math.max(...h.sets.map((s) => s.reps))} reps`) : ""}</span></a></li>`;
   }).join("")}</ul>`).join("") || `<p class="muted" style="margin-top:1rem">No exercise matches “${esc(exQuery)}”.</p>`}</div>
-  ${tabs("exercises")}`;
+  ${tabs("progress")}`;
 }
 
 let chartData = [];
@@ -544,14 +807,18 @@ function viewExercise(id) {
       <div id="chart-host"></div>
       <figcaption class="small muted" style="padding:0 .25rem">${weighted ? "Best set each session, converted with the Epley formula. Tap the chart for details." : "Most reps in a set each session."}</figcaption>
     </figure>` : `<p class="muted" style="margin:1rem 0">${chartData.length ? "Log one more session to see a trend." : "No sessions logged yet."}</p>`}
+  <div class="howto-body" style="margin:1rem 0">${bodyMap(ex.muscles || [], ex.secondary || [])}
+    <label class="field" style="margin:0"><span>Form cues, one per line</span><textarea class="input" data-xfield="cues" rows="4">${esc((ex.cues || []).join("\n"))}</textarea></label></div>
   <div class="field"><span class="small" style="font-weight:600">Equipment</span>
     <div class="toggles" style="margin-top:.35rem">${EQUIPMENT.map((e) => `<button data-act="x-eq" data-v="${e}" aria-pressed="${ex.equipment === e}">${e}</button>`).join("")}</div></div>
-  <div class="field"><span class="small" style="font-weight:600">Muscles worked</span>
-    <div class="toggles" style="margin-top:.35rem">${MUSCLES.map((m) => `<button data-act="x-muscle" data-v="${m}" aria-pressed="${!!ex.muscles?.includes(m)}">${m}</button>`).join("")}</div></div>
+  <div class="field"><span class="small" style="font-weight:600">Main muscles</span>
+    <div class="toggles" style="margin-top:.35rem">${MUSCLES.map((m) => `<button data-act="x-muscle" data-f="muscles" data-v="${m}" aria-pressed="${!!ex.muscles?.includes(m)}">${m}</button>`).join("")}</div></div>
+  <div class="field"><span class="small" style="font-weight:600">Also works</span>
+    <div class="toggles" style="margin-top:.35rem">${MUSCLES.map((m) => `<button data-act="x-muscle" data-f="secondary" data-v="${m}" aria-pressed="${!!ex.secondary?.includes(m)}">${m}</button>`).join("")}</div></div>
+  <label class="field"><span>Movement (decides what it can be swapped with)</span><select class="input" data-xfield="pattern">${Object.entries(PATTERNS).map(([k, v]) => `<option value="${k}" ${ex.pattern === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
   <label class="field"><span>Weight step for suggestions (kg)</span><input class="input" type="number" inputmode="decimal" step="any" min="0" data-xfield="increment" value="${ex.increment ?? ""}" style="max-width:9rem"></label>
-  <label class="field"><span>Notes</span><textarea class="input" data-xfield="notes" placeholder="Setup, cues, form reminders">${esc(ex.notes || "")}</textarea></label>
   ${hist.length ? `<div class="section-head"><h2>Sessions</h2></div><ul class="rows">${hist.map((h) => `<li><a href="#/workout/${h.workout.id}"><span class="r-main"><span class="r-title">${fmtDate(h.workout.startedAt)}</span><br><span class="r-sub">${setsText(h.sets)}</span></span><span class="r-side">${weighted ? `${fmtKg(roundTo(Math.max(...h.sets.map((s) => e1rm(+s.weight || 0, s.reps))), 0.5))} kg` : ""}</span></a></li>`).join("")}</ul>` : ""}
-  ${tabs("exercises")}`;
+  ${tabs("progress")}`;
 }
 
 function wireChart() {
@@ -575,7 +842,7 @@ function wireChart() {
     <line class="cross" id="cross" y1="${T}" y2="${H - B}" x1="-10" x2="-10"/>
     <polyline class="series" points="${pts.map((d) => `${sx(d.at)},${sy(d.best)}`).join(" ")}"/>
     ${pts.map((d, i) => `<circle class="dot" data-i="${i}" cx="${sx(d.at)}" cy="${sy(d.best)}" r="4.5"/>`).join("")}
-    <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent" id="hit"/>
+    <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/>
   </svg>`;
   const svg = $("svg", host), read = $("#chart-read");
   const show = (i) => {
@@ -600,21 +867,30 @@ function wireChart() {
 function viewSettings() {
   const s = db.settings();
   const ALL = [25, 20, 15, 10, 5, 2.5, 1.25, 1, 0.5];
+  const tr = s.track || {};
+  const toggle = (k, label, help) => `<label class="switch"><input type="checkbox" data-track="${k}" ${tr[k] ? "checked" : ""}><span><strong>${label}</strong><br><span class="small muted">${help}</span></span></label>`;
   return `
-  <header class="top"><div class="grow"><h1>Settings</h1></div></header>
-  <label class="field"><span>Barbell weight (kg)</span><input class="input" type="number" inputmode="decimal" step="any" min="0" data-sset="barKg" value="${s.barKg}" style="max-width:9rem"></label>
-  <div class="field"><span class="small" style="font-weight:600">Plates you own (kg)</span>
-    <div class="toggles" style="margin-top:.35rem">${ALL.map((p) => `<button data-act="plate" data-v="${p}" aria-pressed="${s.plates.includes(p)}">${p}</button>`).join("")}</div>
-    <p class="small muted" style="margin-top:.4rem">Used to show which plates to load on each side.</p></div>
-  <div class="section-head"><h2>Sync</h2></div>
+  <header class="top"><a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a><div class="grow"><h1>Settings</h1></div></header>
+  <label class="field"><span>About you (your coach reads this)</span><textarea class="input" data-sset="profile" rows="9">${esc(s.profile || "")}</textarea></label>
+  <label class="field"><span>Bodyweight (kg), the target for your calf raises</span><input class="input" type="number" inputmode="decimal" step="any" min="0" data-sset="bodyweightKg" value="${s.bodyweightKg ?? ""}" style="max-width:9rem"></label>
+  <div class="section-head"><h2>Extra tracking</h2></div>
+  <p class="small muted">Off by default. Each one adds a tap, and gives your coach more to work with.</p>
+  ${toggle("effortPerSet", "Reps left per set", "After each set, tap how many more reps you had in you.")}
+  ${toggle("feelAlways", "How it felt, every exercise", "Easy / About right / Hard after each exercise, not just in calibration week.")}
+  ${toggle("sessionNotes", "Session notes and energy", "A note and a 1–5 energy rating when you finish.")}
+  <div class="section-head"><h2>Barbell</h2></div>
+  <label class="field"><span>Bar weight (kg)</span><input class="input" type="number" inputmode="decimal" step="any" min="0" data-sset="barKg" value="${s.barKg}" style="max-width:9rem"></label>
+  <div class="field"><span class="small" style="font-weight:600">Plates available (kg)</span>
+    <div class="toggles" style="margin-top:.35rem">${ALL.map((p) => `<button data-act="plate" data-v="${p}" aria-pressed="${s.plates.includes(p)}">${p}</button>`).join("")}</div></div>
+  <div class="section-head"><h2>Sync and coach</h2></div>
   <p>${syncDot()}</p>
-  <p class="small muted" style="margin:.4rem 0 .8rem">Everything is saved on this phone first and copied to your account when there's a connection.${db.pendingCount() ? ` ${db.pendingCount()} change${db.pendingCount() === 1 ? "" : "s"} waiting.` : ""}</p>
+  <p class="small muted" style="margin:.4rem 0 .4rem">Everything is saved on this phone first and copied to your account when there's a connection.${db.pendingCount() ? ` ${plural(db.pendingCount(), "change")} waiting.` : ""}</p>
   <p class="small muted" id="whoami"></p>
   <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem">
     <button class="btn sm" data-act="sync-now">Sync now</button>
     <button class="btn sm" data-act="export">Download my data</button>
-  </div>
-  ${tabs("settings")}`;
+    <a class="btn sm" href="#/exercises">Exercise library</a>
+  </div>`;
 }
 
 // ---------- toast ----------
@@ -636,32 +912,9 @@ document.addEventListener("click", async (ev) => {
 
   switch (act) {
     case "reload": ev.preventDefault(); location.reload(); return;
-    case "new-routine": return newRoutine();
-    case "start": return startWorkout(t.dataset.id);
+    case "begin": return beginSession(t.dataset.key);
+    case "swap": return doSwap();
 
-    // routine editor
-    case "add-item": {
-      const r = db.get("routine", route().id);
-      return openPicker((exId) => { r.items = [...(r.items || []), routineItem(exId)]; db.put("routine", r); render(); });
-    }
-    case "swap-ex": {
-      const r = db.get("routine", route().id);
-      return openPicker((exId) => { r.items[i] = { ...r.items[i], exerciseId: exId }; db.put("routine", r); render(); }, "Change exercise");
-    }
-    case "move": {
-      const r = db.get("routine", route().id); const j = i + +t.dataset.d;
-      [r.items[i], r.items[j]] = [r.items[j], r.items[i]]; db.put("routine", r); return render();
-    }
-    case "remove-item": {
-      const r = db.get("routine", route().id); r.items.splice(i, 1); db.put("routine", r); return render();
-    }
-    case "delete-routine": {
-      const v = await confirmSheet({ title: "Delete this routine?", body: "Past workouts stay in your history.", ok: "Delete routine", okClass: "danger" });
-      if (v === "ok") { db.remove("routine", t.dataset.id); go("#/"); toast("Routine deleted"); }
-      return;
-    }
-
-    // runner
     case "jump": {
       const w = activeWorkout(); if (!w) return;
       db.ui({ runIndex: Math.max(0, Math.min(w.entries.length - 1, i)) });
@@ -675,7 +928,7 @@ document.addEventListener("click", async (ev) => {
       const base = f === "weight" && (old == null || old === "") ? (e.sets.slice(0, si).reverse().find((x) => +x.weight)?.weight ?? 0) : +old || 0;
       s[f] = Math.max(0, roundTo(base + d, f === "reps" ? 1 : 0.25));
       if (f === "weight") propagate(e, si, old);
-      saveWorkout(w); return render();
+      db.put("workout", w); return render();
     }
     case "tick": {
       const { w, idx, e } = curEntry(); if (!e) return;
@@ -693,19 +946,29 @@ document.addEventListener("click", async (ev) => {
         const label = nextSet ? `Next: set ${e.sets.indexOf(nextSet) + 1} of ${e.name}` : w.entries[idx + 1] ? `Next: ${w.entries[idx + 1].name}` : "";
         if (!lastOfAll) startRest(e.target.restSec, label); else db.ui({ rest: null });
       } else {
-        s.done = false; delete s.at;
+        s.done = false; delete s.at; delete s.rir;
       }
-      saveWorkout(w); return render();
+      db.put("workout", w); return render();
+    }
+    case "rir": {
+      const { w, e } = curEntry(); if (!e) return;
+      const s = e.sets[+t.dataset.si]; s.rir = s.rir === +t.dataset.v ? undefined : +t.dataset.v;
+      db.put("workout", w); return render();
+    }
+    case "feel": {
+      const { w, e } = curEntry(); if (!e) return;
+      e.feel = e.feel === t.dataset.v ? null : t.dataset.v;
+      db.put("workout", w); return render();
     }
     case "add-set": {
       const { w, e } = curEntry(); if (!e) return;
       const prev = e.sets[e.sets.length - 1];
       e.sets.push({ weight: prev?.weight ?? null, reps: prev?.reps ?? e.target.repMin, done: false });
-      saveWorkout(w); return render();
+      db.put("workout", w); return render();
     }
     case "remove-set": {
       const { w, e } = curEntry(); if (!e || e.sets.length < 2) return;
-      e.sets.pop(); saveWorkout(w); return render();
+      e.sets.pop(); db.put("workout", w); return render();
     }
     case "rest-add": {
       const r = db.ui().rest; if (!r) return;
@@ -717,36 +980,60 @@ document.addEventListener("click", async (ev) => {
     case "finish": return finishWorkout();
     case "run-menu": {
       const w = activeWorkout(); if (!w) return;
-      const v = await confirmSheet({ title: "Workout options", ok: "Finish workout", extra: "Discard workout", cancel: "Close" });
+      const { v } = await confirmSheet({ title: "Session options", ok: "Finish session", extra: "Discard session", cancel: "Close" });
       if (v === "ok") finishWorkout();
       if (v === "extra") {
-        const c = await confirmSheet({ title: "Discard this workout?", body: "Nothing from this session will be saved.", ok: "Discard workout", okClass: "danger" });
-        if (c === "ok") discardWorkout(w);
+        const c = await confirmSheet({ title: "Discard this session?", body: "Nothing from it will be saved.", ok: "Discard session", okClass: "danger" });
+        if (c.v === "ok") discardWorkout(w);
       }
       return;
     }
 
-    // workouts, exercises, settings
+    case "coach-run": {
+      const trig = t.dataset.trigger;
+      if (trig === "new-block") {
+        const p = activeProgram();
+        const pos = p && blockPosition(p);
+        if (p && !pos.done) {
+          const c = await confirmSheet({ title: "Start a new block now?", body: `You're in week ${pos.week + 1} of ${pos.weeks} of ${esc(p.name)}. The coach will end it and write a new one. You can undo this.`, ok: "Write a new block" });
+          if (c.v !== "ok") return;
+        }
+      }
+      lastCoachRequest = { trigger: trig, message: "" };
+      const log = await callCoach(trig);
+      if (log && trig === "new-block") { toast("New block ready"); go("#/"); }
+      return;
+    }
+    case "coach-retry": {
+      const req = lastCoachRequest || { trigger: "session", message: "" };
+      const log = await callCoach(req.trigger, req.message);
+      if (log && req.trigger === "session") db.ui({ pendingCoach: null });
+      return;
+    }
+    case "undo-coach": {
+      const l = db.get("coachlog", t.dataset.id); if (!l) return;
+      const c = await confirmSheet({ title: "Undo these changes?", body: "Your program goes back to how it was before this coach update.", ok: "Undo changes" });
+      if (c.v === "ok") { undoCoach(l); render(); }
+      return;
+    }
+
     case "delete-workout": {
-      const v = await confirmSheet({ title: "Delete this workout?", body: "Its sets will no longer count towards suggestions or charts.", ok: "Delete workout", okClass: "danger" });
-      if (v === "ok") { db.remove("workout", t.dataset.id); go("#/history"); toast("Workout deleted"); }
+      const { v } = await confirmSheet({ title: "Delete this session?", body: "Its sets will no longer count towards suggestions or charts.", ok: "Delete session", okClass: "danger" });
+      if (v === "ok") { db.remove("workout", t.dataset.id); go("#/history"); toast("Session deleted"); }
       return;
     }
     case "new-exercise": {
-      const ex = db.put("exercise", { id: db.uid("ex"), name: "New exercise", equipment: "dumbbell", muscles: [], increment: DEFAULT_INCREMENT.dumbbell, notes: "" });
+      const ex = db.put("exercise", { id: db.uid("ex"), name: "New exercise", equipment: "dumbbell", pattern: "biceps", muscles: [], secondary: [], cues: [], increment: DEFAULT_INCREMENT.dumbbell, notes: "" });
       go(`#/exercise/${ex.id}`);
       setTimeout(() => { const n = $('[data-xfield="name"]'); n?.focus(); n?.select(); }, 50);
       return;
     }
     case "delete-exercise": {
-      const used = routines().filter((r) => r.items?.some((it) => it.exerciseId === t.dataset.id));
-      const v = await confirmSheet({
-        title: "Delete this exercise?",
-        body: used.length ? `It's in ${used.map((r) => esc(r.name)).join(", ")}. It will be removed from ${used.length === 1 ? "that routine" : "those routines"}. Past workouts keep their sets.` : "Past workouts keep their sets.",
-        ok: "Delete exercise", okClass: "danger",
-      });
+      const p = activeProgram();
+      const used = p?.sessions.some((s) => s.items.some((it) => it.exerciseId === t.dataset.id));
+      if (used) { toast("It's in your current block. Swap it out first."); return; }
+      const { v } = await confirmSheet({ title: "Delete this exercise?", body: "Past sessions keep their sets.", ok: "Delete exercise", okClass: "danger" });
       if (v !== "ok") return;
-      for (const r of used) { r.items = r.items.filter((it) => it.exerciseId !== t.dataset.id); db.put("routine", r); }
       db.remove("exercise", t.dataset.id); go("#/exercises"); toast("Exercise deleted");
       return;
     }
@@ -758,8 +1045,8 @@ document.addEventListener("click", async (ev) => {
       db.put("exercise", ex); return render();
     }
     case "x-muscle": {
-      const ex = db.get("exercise", route().id); const m = t.dataset.v;
-      ex.muscles = ex.muscles?.includes(m) ? ex.muscles.filter((x) => x !== m) : [...(ex.muscles || []), m];
+      const ex = db.get("exercise", route().id); const m = t.dataset.v; const f = t.dataset.f;
+      ex[f] = ex[f]?.includes(m) ? ex[f].filter((x) => x !== m) : [...(ex[f] || []), m];
       db.put("exercise", ex); return render();
     }
     case "plate": {
@@ -775,6 +1062,17 @@ document.addEventListener("click", async (ev) => {
       return;
     }
   }
+});
+
+document.addEventListener("submit", async (ev) => {
+  if (ev.target.dataset.form !== "ask") return;
+  ev.preventDefault();
+  const q = $("#ask-q").value.trim();
+  if (!q) { $("#ask-q").focus(); return; }
+  lastCoachRequest = { trigger: "ask", message: q };
+  const log = await callCoach("ask", q);
+  if (log) toast(log.changes?.length ? "Coach updated your plan" : "Coach replied");
+  else { const box = $("#ask-q"); if (box) box.value = q; }
 });
 
 /** When set N's weight changes, carry it to later unticked sets that had the same weight. */
@@ -804,42 +1102,30 @@ document.addEventListener("input", (ev) => {
       e.sets.forEach((x, j) => { const inp = $(`[data-sfield="weight"][data-si="${j}"]`); if (inp && inp !== el && !x.done) inp.value = x.weight ?? ""; });
       const lo = $("#loadout"); if (lo) lo.innerHTML = loadoutHtml(e);
     } else s.reps = v == null ? null : Math.round(v);
-    saveWorkout(w);
+    db.put("workout", w);
     return;
-  }
-  if (el.dataset.rfield) {
-    const r = db.get("routine", route().id); r[el.dataset.rfield] = el.value; db.put("routine", r); return;
-  }
-  if (el.dataset.ifield) {
-    const r = db.get("routine", route().id); const it = r.items[+el.dataset.i];
-    if (el.value !== "") it[el.dataset.ifield] = Math.max(0, Math.round(+el.value));
-    db.put("routine", r); return;
   }
   if (el.dataset.xfield) {
     const ex = db.get("exercise", route().id); const f = el.dataset.xfield;
-    ex[f] = f === "increment" ? (el.value === "" ? null : +el.value) : el.value;
+    if (f === "increment") ex[f] = el.value === "" ? null : +el.value;
+    else if (f === "cues") ex.cues = el.value.split("\n").map((x) => x.trim()).filter(Boolean);
+    else ex[f] = el.value;
     db.put("exercise", ex); return;
   }
   if (el.dataset.sset) {
-    const s = { ...db.settings() }; if (el.value !== "") s[el.dataset.sset] = +el.value; db.put("settings", s);
+    const s = { ...db.settings() }; const k = el.dataset.sset;
+    if (k === "profile") s.profile = el.value;
+    else s[k] = el.value === "" ? null : +el.value;
+    db.put("settings", s);
+  }
+  if (el.dataset.track) {
+    const s = { ...db.settings() }; s.track = { ...(s.track || {}), [el.dataset.track]: el.checked }; db.put("settings", s);
   }
 });
 
-// Tidy up routine numbers when a field is left.
-document.addEventListener("change", (ev) => {
-  const el = ev.target;
-  if (el.dataset.ifield) {
-    const r = db.get("routine", route().id); const it = r.items[+el.dataset.i];
-    it.sets = Math.min(20, Math.max(1, it.sets || 1));
-    it.repMin = Math.max(1, it.repMin || 1);
-    it.repMax = Math.max(it.repMin, it.repMax || it.repMin);
-    db.put("routine", r);
-    el.closest(".item").querySelectorAll("[data-ifield]").forEach((x) => { x.value = it[x.dataset.ifield]; });
-  }
-  if (el.dataset.rfield === "name" && !el.value.trim()) {
-    const r = db.get("routine", route().id); r.name = "Untitled routine"; db.put("routine", r); el.value = r.name;
-  }
-});
+document.addEventListener("toggle", (ev) => {
+  if (ev.target.classList?.contains("howto")) db.ui({ howtoOpen: ev.target.open });
+}, true);
 
 addEventListener("keydown", (e) => { if (e.key === "Escape" && sheetOpen) closeSheet(); });
 addEventListener("hashchange", () => { closeSheet(); render(); });
@@ -854,6 +1140,7 @@ db.subscribe((reason) => {
   document.querySelectorAll(".sync-dot").forEach((el) => { el.outerHTML = syncDot(); });
   if (reason === "remote") pendingRender = true;
   if (pendingRender && !busy()) { pendingRender = false; render(); }
+  if (reason !== "local" && db.sync.status === "synced") maybeRunPendingCoach();
 });
 document.addEventListener("focusout", () => setTimeout(() => {
   if (pendingRender && !busy()) { pendingRender = false; render(); }
@@ -862,7 +1149,12 @@ document.addEventListener("focusout", () => setTimeout(() => {
 async function whoami() {
   try {
     const r = await fetch("/api/me", { redirect: "manual" });
-    if (r.ok) { const { email } = await r.json(); const el = $("#whoami"); if (el) el.textContent = `Signed in as ${email}`; }
+    if (r.ok) {
+      const { email, coach } = await r.json();
+      coachInfo.available = coach;
+      const el = $("#whoami");
+      if (el) el.textContent = `Signed in as ${email}. Coach ${coach ? "is on" : "is off: add an ANTHROPIC_API_KEY secret to switch it on"}.`;
+    }
   } catch {}
 }
 
@@ -870,7 +1162,7 @@ async function whoami() {
 db.seedIfEmpty();
 render();
 db.startSyncLoop();
-if (route().name === "settings") whoami();
+whoami();
 addEventListener("hashchange", () => route().name === "settings" && whoami());
 if ("serviceWorker" in navigator && location.hostname !== "localhost") {
   navigator.serviceWorker.register("/sw.js").catch(() => {});

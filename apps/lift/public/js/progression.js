@@ -103,3 +103,56 @@ export function trend(hist) {
     }))
     .reverse();
 }
+
+/**
+ * Full prescription for one program item: double progression, then adjusted for
+ * how the last session felt, the block phase, and (for rehab) today's Achilles check.
+ * ctx: { phase, achilles (0-10 or null), prevAchilles (0-10 or null) }
+ * Returns { weight, reps[], sets, kind, reason }
+ */
+export function prescribe(hist, item, increment, ctx = {}) {
+  const { phase = "build", achilles = null, prevAchilles = null } = ctx;
+  const rehab = item.role === "rehab";
+  let s = { ...suggest(hist, item, increment), sets: item.sets };
+
+  if (!hist.length) {
+    s.reason = rehab
+      ? `Start with a load you can move slowly for ${item.repMax} reps with no more than mild Achilles discomfort. It builds from there.`
+      : phase === "calibration"
+        ? `Calibration: start light and add weight each set until ${item.repMax} reps feels about right. Then tell me how it felt.`
+        : s.reason;
+  } else {
+    const feel = hist[0].entry?.feel;
+    const w = s.weight;
+    if (feel === "easy" && w != null && increment && s.kind !== "deload") {
+      const lastTop = Math.max(...hist[0].sets.map((x) => +x.weight || 0));
+      const up = roundTo(lastTop + 2 * increment, increment);
+      s = { ...s, weight: up, reps: s.reps.map(() => item.repMin), kind: "up", reason: `Last time felt easy at ${fmtKg(lastTop)} kg. Up two steps to ${fmtKg(up)} kg.` };
+    } else if (feel === "hard" && s.kind === "up") {
+      const prevW = Math.max(...hist[0].sets.map((x) => +x.weight || 0));
+      s = { ...s, weight: prevW, reps: s.reps.map(() => item.repMax), kind: "hold", reason: `You hit the reps, but it felt hard. Stay at ${fmtKg(prevW)} kg and own it before adding weight.` };
+    }
+  }
+
+  if (rehab && achilles != null && s.weight != null) {
+    const rising = prevAchilles != null && achilles - prevAchilles >= 2;
+    if (achilles >= 6) {
+      const base = hist.length ? Math.max(...hist[0].sets.map((x) => +x.weight || 0)) : s.weight;
+      const down = roundTo(base * 0.85, increment || 1);
+      s = { ...s, weight: down, kind: "deload", reason: `Achilles is ${achilles}/10 today, so calf load comes down to ${fmtKg(down)} kg. If it gets worse during the sets, stop and check with your physio.` };
+    } else if ((achilles >= 4 || rising) && s.kind === "up") {
+      const prevW = Math.max(...hist[0].sets.map((x) => +x.weight || 0));
+      s = { ...s, weight: prevW, kind: "hold", reason: `Achilles is ${achilles}/10 today${rising ? ", up since last session" : ""}, so calf load holds at ${fmtKg(prevW)} kg instead of going up.` };
+    }
+  }
+
+  if (phase === "deload" && hist.length) {
+    const sets = Math.max(1, item.sets - 1);
+    const weight = s.weight != null ? roundTo(s.weight * 0.9, increment || 1) : null;
+    s = { ...s, sets, weight, reps: Array.from({ length: sets }, () => item.repMin), kind: "deload",
+      reason: `Deload week: ${sets} sets at ${weight != null ? `${fmtKg(weight)} kg` : "an easier effort"}, so you recover before the next block. It should feel easy.` };
+  }
+
+  if (s.reps.length !== s.sets) s.reps = Array.from({ length: s.sets }, (_, i) => s.reps[i] ?? s.reps[s.reps.length - 1] ?? item.repMin);
+  return s;
+}

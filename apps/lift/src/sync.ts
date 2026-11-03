@@ -20,7 +20,7 @@ export interface SyncResult {
   more: boolean;
 }
 
-export const KINDS = new Set(["exercise", "routine", "workout", "settings"]);
+export const KINDS = new Set(["exercise", "routine", "workout", "settings", "program", "coachlog"]);
 export const MAX_CHANGES_IN = 2000;
 export const PAGE_SIZE = 1000;
 const MAX_DATA_BYTES = 256 * 1024;
