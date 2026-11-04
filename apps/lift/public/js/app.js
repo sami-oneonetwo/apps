@@ -444,7 +444,7 @@ function viewRun() {
     ${next ? `<p class="up-next-line"><span class="muted">Next</span> ${esc(next.name)}, ${next.target.sets} × ${repRange(next.target)}</p>` : `<p class="up-next-line"><span class="muted">Last exercise</span></p>`}
     <div class="run-nav-btns">
       <button class="btn tonal icon-only" data-act="jump" data-i="${idx - 1}" ${idx === 0 ? "disabled" : ""} aria-label="Previous exercise">${I.back}</button>
-      ${next ? `<button class="btn primary" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
+      ${next ? `<button class="btn ${allDone ? "go" : "tonal"}" data-act="jump" data-i="${idx + 1}">Next exercise</button>`
              : `<button class="btn go" data-act="finish">Finish session</button>`}
     </div>
   </div>`;

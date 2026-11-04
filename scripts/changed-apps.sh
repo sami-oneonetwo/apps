@@ -31,7 +31,7 @@ fi
 changed="$(git diff --name-only "$base" "$head")"
 
 # Shared files affect every app.
-if grep -qE '^(package\.json|package-lock\.json|\.github/workflows/deploy\.yml|scripts/changed-apps\.sh)$' <<<"$changed"; then
+if grep -qE '^(package\.json|package-lock\.json|\.github/workflows/deploy\.yml|scripts/changed-apps\.sh|shared/.*)$' <<<"$changed"; then
   all_apps | sort -u | to_json; exit 0
 fi
 

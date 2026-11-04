@@ -6,3 +6,6 @@ node_modules/
 .env.*
 dist/
 .DS_Store
+
+# Copied in by CI (and scripts/house.sh) from shared/house
+apps/*/public/house/

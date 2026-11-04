@@ -4,16 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>hello</title>
+  <meta name="theme-color" content="#111214">
+  <link rel="stylesheet" href="/house/house.css">
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 40rem; margin: 4rem auto; padding: 0 1.25rem; line-height: 1.5; }
-    code, pre { font-family: ui-monospace, monospace; }
-    pre { background: color-mix(in srgb, currentColor 8%, transparent); padding: 1rem; border-radius: .5rem; overflow-x: auto; }
+    main { max-width: 34rem; margin: 0 auto; padding: var(--space-6) var(--space-4); }
+    pre { background: var(--surface-1); padding: var(--space-4); overflow-x: auto; font-size: 14px; }
   </style>
 </head>
 <body>
+<main>
   <h1>hello</h1>
-  <p>Deployed from <code>apps/hello</code>. The Worker answered:</p>
+  <p class="muted" style="margin:var(--space-3) 0">Deployed from <code>apps/hello</code>. The Worker answered:</p>
   <pre id="out">loading…</pre>
   <script>
     fetch("/api/whoami")
@@ -21,6 +22,7 @@
       .then((j) => { document.getElementById("out").textContent = JSON.stringify(j, null, 2); })
       .catch((e) => { document.getElementById("out").textContent = String(e); });
   </script>
+</main>
 </body>
 </html>
 x

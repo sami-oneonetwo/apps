@@ -12,6 +12,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "scripts/changed-apps.sh"
+      - "shared/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
     inputs:
@@ -101,6 +102,11 @@ jobs:
             echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in repo Settings > Secrets and variables > Actions"
             exit 1
           }
+
+      - name: Add the house style
+        run: |
+          rm -rf "apps/${{ matrix.app }}/public/house"
+          cp -R shared/house "apps/${{ matrix.app }}/public/house"
 
       - name: Test
         working-directory: apps/${{ matrix.app }}

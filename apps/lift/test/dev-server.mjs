@@ -79,6 +79,9 @@ http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith("/api/")) return send(404, '{"error":"Not found"}');
   let p = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
+  if (p.startsWith("/house/")) {
+    try { return send(200, await readFile(join(root, "../../../shared", p)), TYPES[extname(p)] || "text/plain"); } catch {}
+  }
   if (p.endsWith("/")) p += "index.html";
   try {
     const buf = await readFile(join(root, p));
