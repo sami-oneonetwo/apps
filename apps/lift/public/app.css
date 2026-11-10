@@ -282,3 +282,33 @@ main.run { padding-bottom: calc(150px + var(--safe-b)); }
 .search { margin-bottom: var(--space-2); }
 .input.big { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
 .mini > span { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: var(--space-1); }
+
+/* ---------- other workouts: routine page and interval runner ---------- */
+.iv-moves { list-style: none; counter-reset: mv; margin: 0; padding: 0; border-top: var(--border-hair) solid var(--line); }
+.iv-moves li { counter-increment: mv; display: grid; grid-template-columns: 24px 1fr auto; gap: var(--space-2) var(--space-3); align-items: center; padding: var(--space-3) 0; border-bottom: var(--border-hair) solid var(--line); }
+.iv-moves li::before { content: counter(mv); color: var(--ink-3); font-weight: 600; }
+.iv-move-name { text-decoration: none; font-weight: 500; min-width: 0; }
+.iv-bell { grid-template-columns: 40px 64px 40px; height: 44px; }
+.iv-bell span { text-align: center; font-weight: 700; }
+.iv-bell small { font-weight: 500; color: var(--ink-2); font-size: 12px; }
+
+main.interval { padding-bottom: calc(110px + var(--safe-b)); }
+.iv-seq span { flex: 1; height: 4px; margin-top: 10px; background: var(--surface-2); }
+.iv-seq span[data-state="done"] { background: var(--success); }
+.iv-seq span[aria-current="step"] { height: 8px; margin-top: 8px; background: var(--accent); }
+.iv-focus { padding: var(--space-4) 0 var(--space-5); }
+.iv-row { display: flex; justify-content: space-between; align-items: baseline; }
+.iv-phase { font-size: 15px; font-weight: 700; }
+.iv-focus[data-phase="work"] .iv-phase { color: var(--accent); }
+.iv-round { font-size: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.iv-clock { margin: var(--space-2) 0 var(--space-3); font-size: 104px; line-height: 1; font-weight: 700; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
+.iv-focus[data-phase="work"] .iv-clock { color: var(--ink); }
+.iv-focus:not([data-phase="work"]) .iv-clock { color: var(--ink-2); }
+.iv-move { font-size: 32px; line-height: 36px; }
+.iv-meta { margin-top: var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; color: var(--ink-2); }
+.iv-meta strong { color: var(--ink); font-size: 18px; }
+.iv-side { padding: 2px var(--space-2); background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 700; }
+.iv-cues { margin: var(--space-4) 0 0; padding-left: 20px; display: grid; gap: var(--space-2); color: var(--ink-2); font-size: 15px; }
+.iv-btns { display: grid; grid-template-columns: var(--tap) 1fr var(--tap); gap: var(--space-2); }
+.iv-done { padding: var(--space-6) 0; }
+.iv-done h1 { margin: var(--space-2) 0 var(--space-5); }

@@ -83,6 +83,11 @@ function frontJoints(p) {
     const wrist = add(elbow, v(fa, p.farmLen ?? SEG.farm));
     Object.assign(J, { ["hip" + s]: hip, ["knee" + s]: knee, ["ankle" + s]: ankle, ["shoulder" + s]: sh, ["elbow" + s]: elbow, ["wrist" + s]: wrist });
   }
+  // Both hands on one bell: the left hand meets the right, elbow solved to fit.
+  if (p.together) {
+    J.wristL = J.wristR;
+    J.elbowL = ik(J.shoulderL, J.wristL, p.uarmLen ?? SEG.uarm, p.farmLen ?? SEG.farm, J.wristR[1] < J.shoulderL[1] ? -1 : 1);
+  }
   return J;
 }
 
@@ -195,7 +200,7 @@ export function movementHtml(spec, name) {
       <g data-frame>${frameSvg(spec, reduced() ? 1 : 0)}</g>
     </svg>
     <figcaption><span data-mv-phase>${spec.labels?.[0] ?? ""}</span>${tempo ? `<span class="mv-tempo">${tempo}</span>` : ""}
-      <button class="mv-toggle" data-act="mv-toggle" aria-pressed="${!reduced()}">${reduced() ? "Play" : "Pause"}</button></figcaption>
+      <button class="mv-toggle" data-act="mv-toggle" aria-pressed="${!reduced()}" aria-label="${reduced() ? "Play" : "Pause"} animation">${reduced() ? "Play" : "Pause"}</button></figcaption>
   </figure>`;
 }
 
@@ -229,4 +234,5 @@ export function toggle(btn) {
   else state.pausedAt = performance.now() - state.t0;
   btn.setAttribute("aria-pressed", String(state.playing));
   btn.textContent = state.playing ? "Pause" : "Play";
+  btn.setAttribute("aria-label", `${state.playing ? "Pause" : "Play"} animation`);
 }

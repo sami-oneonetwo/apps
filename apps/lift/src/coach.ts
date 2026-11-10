@@ -68,6 +68,7 @@ How the app already works, so you don't duplicate it:
 - Weights progress automatically by double progression: when every set reaches the top of the rep range, the next session adds the exercise's weight step and drops to the bottom of the range. Otherwise it holds the weight and asks for a rep more.
 - "Easy" taps move weight up faster and "Hard" taps hold. Deload weeks automatically drop a set and about 10% load.
 - Calf rehab load is gated by the athlete's Achilles check (0–10) at the start of each session: 4+ or rising holds the load, 6+ cuts it.
+- Kettlebell interval workouts are optional extras the athlete picks outside the block. Count their volume and fatigue (and Achilles response: some moves pivot on the back foot), but never treat a skipped one as missed. Their level is adjusted by the app from how they felt.
 Your job is the structure: exercises, sets, rep ranges, rest, notes, which session comes next, and new blocks.
 
 Rules:
@@ -116,6 +117,11 @@ export function buildUserPrompt(snap: Snapshot, trigger: Trigger, request: strin
   const recent = snap.workouts.filter((w) => w.finishedAt).sort((a, b) => b.startedAt - a.startedAt).slice(0, 15);
   lines.push(`\n## Recent sessions, newest first (${recent.length})`);
   for (const w of recent) {
+    if (w.kind === "interval") {
+      lines.push(`${fmtDate(w.startedAt)} optional kettlebell interval workout "${w.name}", level ${w.level}, ${w.work}s on/${w.rest}s off, ${w.roundsDone ?? "?"} of ${w.rounds} rounds${w.achilles != null ? `, Achilles ${w.achilles}/10` : ""}${w.feel ? `, felt ${w.feel}` : ""}`);
+      for (const e of w.entries || []) lines.push(`  - ${e.name}${e.swappedFrom ? ` (feet-planted swap for the Achilles)` : ""}: ${(e.sets || []).filter((s: Rec) => s.done).length} intervals${e.sets?.[0]?.weight ? ` with a ${e.sets[0].weight} kg bell` : ""}`);
+      continue;
+    }
     lines.push(`${fmtDate(w.startedAt)} session ${w.sessionKey ?? "?"} "${w.name}"${w.phase ? `, ${w.phase}` : ""}${w.achilles != null ? `, Achilles ${w.achilles}/10` : ""}, ${Math.round((w.finishedAt - w.startedAt) / 60000)} min${w.note ? `, note: "${w.note}"` : ""}${w.energy ? `, energy ${w.energy}/5` : ""}`);
     for (const e of w.entries || []) {
       const sets = (e.sets || []).filter((s: Rec) => s.done).map((s: Rec) => `${+s.weight ? `${s.weight}×` : ""}${s.reps}${s.rir != null ? `@${s.rir}RIR` : ""}`).join(", ");

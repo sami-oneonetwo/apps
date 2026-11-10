@@ -1,7 +1,7 @@
 // Local-first store. Everything lives in localStorage and works offline;
 // changes queue up and sync to the server whenever it can be reached.
 
-import { SEED_EXERCISES, DEFAULT_SETTINGS, SEED_VERSION } from "./seed.js";
+import { SEED_EXERCISES, DEFAULT_SETTINGS, SEED_VERSION, SEED_ROUTINES } from "./seed.js";
 import { blockOne } from "./program.js";
 
 const KEY = "lift:v1";
@@ -59,6 +59,10 @@ export function seedIfEmpty() {
   for (const e of SEED_EXERCISES) {
     const cur = state.records.exercise[e.id];
     if (!cur || (!cur.deleted && (cur.updatedAt || 0) < e.updatedAt)) mark("exercise", e);
+  }
+  for (const r of SEED_ROUTINES) {
+    const cur = state.records.routine[r.id];
+    if (!cur || (!cur.deleted && (cur.updatedAt || 0) < r.updatedAt)) mark("routine", r);
   }
   const st = state.records.settings.main;
   if (!st) mark("settings", DEFAULT_SETTINGS);

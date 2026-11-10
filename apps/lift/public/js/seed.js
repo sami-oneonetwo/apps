@@ -2,7 +2,7 @@
 // same records, a newer library version replaces older seeds, and any edit you
 // make (stamped with the current time) always wins.
 
-export const SEED_VERSION = 2;
+export const SEED_VERSION = 3;
 
 export const MUSCLES = [
   "chest", "shoulders", "triceps", "biceps", "forearms", "upper back", "lats",
@@ -22,6 +22,7 @@ export const PATTERNS = {
   "calf-bent-knee": "Bent-knee calf raise", "calf-straight": "Straight-leg calf raise",
   "core-anti": "Core stability", "core-flex": "Core flexion", "glute-med": "Glute medius",
   "ham-curl": "Hamstring curl", "quad-ext": "Quad isolation", "back-ext": "Back extension", mace: "Mace",
+  rotation: "Rotation", "kb-ballistic": "Kettlebell swing",
 };
 
 const E = (name, equipment, pattern, muscles, secondary, cues) => ({
@@ -165,10 +166,48 @@ export const SEED_EXERCISES = [
   E("Copenhagen plank", "bodyweight", "core-anti", ["adductors", "core"], [],
     ["Top leg on the bench, bottom leg free", "Hips up in a straight line", "Short holds, build up"]),
 
+  // ---- kettlebell rotation and cross-body ----
+  E("Kettlebell halo", "kettlebell", "rotation", ["shoulders", "core"], ["upper back", "triceps"],
+    ["Hold the bell upside down by the horns, at chest height", "Circle it slowly around your head, close to the neck", "Ribs down and glutes tight so only the arms move. Change direction each round"]),
+  E("Kettlebell figure 8", "kettlebell", "rotation", ["core", "glutes"], ["hamstrings", "forearms", "lower back"],
+    ["Wide stance, hinge forward with a flat back", "Pass the bell between your legs from one hand to the other, around the outside of each leg", "Hips stay back and still. Let the trunk resist the pull"]),
+  E("Kettlebell woodchop", "kettlebell", "rotation", ["core", "shoulders"], ["glutes", "upper back"],
+    ["Both hands on the horns, bell starts high over one shoulder", "Chop diagonally across your body to the opposite hip, turning from the hips", "Let the back heel lift and pivot gently. Swap sides halfway"]),
+  E("Half-kneeling kettlebell chop", "kettlebell", "rotation", ["core", "shoulders"], ["glutes"],
+    ["One knee down, front foot flat: no foot pivot, so it is kind to the Achilles", "Chop the bell from high over one shoulder across to the opposite hip", "Squeeze the glute of the down knee and keep your hips square. Swap sides halfway"]),
+  E("Kettlebell gorilla row", "kettlebell", "horizontal-pull", ["upper back", "lats"], ["core", "hamstrings", "biceps"],
+    ["Two bells on the floor between wide feet, hinge to hold them", "Row one bell to your hip while pressing the other into the floor", "Alternate sides and don't let your hips twist"]),
+  E("Kettlebell Russian twist", "kettlebell", "rotation", ["core"], ["shoulders"],
+    ["Sit tall, leaning back a little, heels on the floor", "Hold the bell at your chest and turn it to one hip, then the other", "Turn from the ribs and keep the bell close. Lift the feet only once it is easy"]),
+
   // ---- other ----
   E("Mace 360", "mace", "mace", ["shoulders", "core"], ["upper back", "forearms"],
     ["Start light", "Keep the mace close behind your head", "Ribs down, move from the shoulders"]),
 ];
+
+// Moves that pivot on the back foot, and what to do instead on a sore-Achilles day.
+const PIVOT = { "ex-kettlebell-woodchop": "ex-half-kneeling-kettlebell-chop" };
+for (const e of SEED_EXERCISES) if (PIVOT[e.id]) Object.assign(e, { pivot: true, planted: PIVOT[e.id] });
+for (const e of SEED_EXERCISES) if (e.equipment === "kettlebell") e.increment = 2;
+
+/** Workouts you pick yourself, outside the block. Interval format: work/rest on a clock. */
+export const SEED_ROUTINES = [{
+  id: "kb-rotation",
+  name: "Kettlebell rotation",
+  format: "interval",
+  description: "A beginner HIIT circuit of rotation and across-the-body kettlebell moves for trunk stability and full-body conditioning. Move well first; speed comes later.",
+  level: 1,
+  items: [
+    { exerciseId: "ex-kettlebell-halo", sides: false, bell: 8, note: "Change direction each round." },
+    { exerciseId: "ex-kettlebell-figure-8", sides: false, bell: 12, note: "" },
+    { exerciseId: "ex-kettlebell-swing", sides: false, bell: 16, note: "Hinge, don't squat. Bell floats to chest height." },
+    { exerciseId: "ex-kettlebell-woodchop", sides: true, bell: 8, note: "Back heel pivots gently." },
+    { exerciseId: "ex-kettlebell-gorilla-row", sides: false, bell: 12, note: "Two bells, alternate rows." },
+    { exerciseId: "ex-kettlebell-russian-twist", sides: false, bell: 8, note: "" },
+  ],
+  createdBy: "claude",
+  updatedAt: SEED_VERSION,
+}];
 
 export const DEFAULT_PROFILE = `Goal: build a solid base that lasts long into life. Train every muscle group, with extra focus on weaker areas: glutes and chest.
 Schedule: 3 sessions a week, about 45 minutes each, at a commercial gym with all equipment.

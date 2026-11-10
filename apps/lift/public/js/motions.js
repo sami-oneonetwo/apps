@@ -434,6 +434,50 @@ export const MOTIONS = {
     props: [...bench(140, 136, 50)],
   },
 
+  // ---------- kettlebell rotation ----------
+  "ex-kettlebell-halo": {
+    root: "ankle", tempo: [1.5, 1.5], hold: [0.1, 0.1], labels: ["Around", "And back"],
+    say: "holding the bell upside down by the horns, circle it close around the head while the hips and ribs stay still",
+    A: { ...stand, at: A0, uarm: 150, farm: 30 },
+    B: { uarm: 20, farm: -150 },
+    props: [{ t: "kb", at: "wrist", dy: -12, behind: false }],
+  },
+  "ex-kettlebell-figure-8": {
+    root: "ankle", tempo: [1, 1], hold: [0.1, 0.1], labels: ["Through", "Around"],
+    say: "hinged with a flat back, pass the bell between the legs from hand to hand and around the outside of each leg",
+    A: { ...stand, at: A0, shin: 14, thigh: -36, torso: 62, uarm: 200, farm: 205 },
+    B: { uarm: 160, farm: 168 },
+    props: [{ t: "kb", at: "wrist", behind: false }],
+  },
+  "ex-kettlebell-woodchop": {
+    view: "front", tempo: [1, 1.5], hold: [0.2, 0.2], labels: ["Chop across", "Back up"],
+    say: "both hands on the bell, chop it from high over one shoulder diagonally across the body to the opposite hip, back heel pivoting gently",
+    A: { at: [100, 88], together: true, uarmR: 20, farmR: 6, thighR: 186, thighL: -184 },
+    B: { uarmR: 212, farmR: 232, thighR: 178, thighL: -176 },
+    props: [{ t: "kb", at: "wristR", dx: -6, dy: -6, behind: false }],
+  },
+  "ex-half-kneeling-kettlebell-chop": {
+    view: "front", tempo: [1, 1.5], hold: [0.2, 0.2], labels: ["Chop across", "Back up"],
+    say: "one knee down and hips square, chop the bell from high over one shoulder across the body to the opposite hip",
+    A: { at: [100, 122], together: true, thighLen: 46, shinLen: 2, thighR: 150, shinR: 180, thighL: -180, uarmR: 20, farmR: 6 },
+    B: { uarmR: 212, farmR: 232 },
+    props: [{ t: "kb", at: "wristR", dx: -6, dy: -6, behind: false }],
+  },
+  "ex-kettlebell-gorilla-row": {
+    root: "ankle", tempo: [1, 1], hold: [0.3, 0.3], labels: ["Row one side", "Row the other"],
+    say: "hinged over two bells, row one to the hip while the other presses into the floor, then alternate without twisting",
+    A: { ...stand, at: A0, shin: 18, thigh: -40, torso: 72, uarm: 236, farm: 172, uarm2: 180, farm2: 180 },
+    B: { uarm: 180, farm: 180, uarm2: 236, farm2: 172 },
+    props: [{ t: "kb", at: "wrist", behind: false }, { t: "kb", at: "wrist2" }],
+  },
+  "ex-kettlebell-russian-twist": {
+    view: "front", tempo: [1, 1], hold: [0.2, 0.2], labels: ["Turn left", "Turn right"],
+    say: "sitting tall and leaning back slightly with heels down, turn the bell from one hip to the other",
+    A: { at: [100, 150], together: true, thighLen: 18, shinLen: 18, thighR: 120, shinR: 160, torsoLen: 46, uarmR: 205, farmR: 262 },
+    B: { uarmR: 168, farmR: 128 },
+    props: [{ t: "kb", at: "wristR", dx: -10, dy: 2, behind: false }],
+  },
+
   // ---------- other ----------
   "ex-mace-360": {
     root: "ankle", tempo: [1.2, 1.2], hold: [0.2, 0.2], labels: ["Behind", "Over and back"],

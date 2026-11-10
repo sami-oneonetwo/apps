@@ -6,6 +6,7 @@ import { blockPosition, nextSession, setsPerMuscle, weekStart, PHASE_TEXT, WEEK 
 import { bodyMap } from "./body.js";
 import { movementHtml, start as startMovement, toggle as toggleMovement } from "./anim.js";
 import { motionFor } from "./motions.js";
+import * as iv from "./interval.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -93,17 +94,18 @@ function route() {
 
 function render() {
   const r = route();
-  const views = { today: viewToday, session: viewSessionPreview, run: viewRun, workout: viewWorkout, history: viewHistory, exercises: viewExercises, exercise: viewExercise, settings: viewSettings, coach: viewCoach, progress: viewProgress, block: viewBlock };
+  const views = { routine: viewRoutine, interval: viewInterval, today: viewToday, session: viewSessionPreview, run: viewRun, workout: viewWorkout, history: viewHistory, exercises: viewExercises, exercise: viewExercise, settings: viewSettings, coach: viewCoach, progress: viewProgress, block: viewBlock };
   const fn = views[r.name] || viewToday;
-  app.className = r.name === "run" ? "run" : "";
+  app.className = r.name === "run" ? "run" : r.name === "interval" ? "run interval" : "";
   app.innerHTML = fn(r.id);
   if (r.name === "exercise") wireChart();
-  if (r.name === "run" || r.name === "exercise") {
-    const exId = r.name === "exercise" ? r.id : curEntry().e?.exerciseId;
+  if (r.name === "run" || r.name === "exercise" || r.name === "interval") {
+    const exId = r.name === "exercise" ? r.id : r.name === "interval" ? intervalFocusExercise() : curEntry().e?.exerciseId;
     const spec = motionFor(db.get("exercise", exId));
     if (spec) startMovement(app, spec);
   }
-  wakeLock(r.name === "run");
+  wakeLock(r.name === "run" || r.name === "interval");
+  if (r.name === "interval") startIntervalTicker(); else stopIntervalTicker();
   renderRest();
 }
 
@@ -135,6 +137,12 @@ function viewToday() {
     const hue = hueFor(active.sessionKey, p);
     const done = active.entries.reduce((a, e) => a + e.sets.filter((x) => x.done).length, 0);
     const total = active.entries.reduce((a, e) => a + e.sets.length, 0);
+    if (active.kind === "interval") {
+      return `${head}${meter}<a class="hero resume-hero" href="#/interval">
+        <div class="hero-top">${disc("KB", "none")}<span>In progress since ${fmtTime(active.startedAt)}</span></div>
+        <h1 class="hero-title">${esc(active.name)}</h1>
+        <span class="btn go block">Resume workout</span></a>${otherWorkouts()}${tabs("today")}`;
+    }
     return `${head}${meter}<a class="hero resume-hero" data-hue="${hue}" href="#/run">
       <div class="hero-top">${disc(active.sessionKey, hue)}<span>In progress since ${fmtTime(active.startedAt)}</span></div>
       <h1 class="hero-title">${esc(active.name)}</h1>
@@ -173,6 +181,7 @@ function viewToday() {
   </section>
   <div class="section-head"><h2>This week</h2><span class="muted small">${done.size} of ${p.sessions.length} done</span></div>
   <ul class="rows week-rows">${p.sessions.map((x) => `<li><a href="#/session/${x.key}">${disc(x.key, hueFor(x.key, p), done.has(x.key))}<span class="r-main"><span class="r-title">${esc(x.name)}</span><br><span class="r-sub">${esc(x.focus || "")}</span></span><span class="r-side small">${done.has(x.key) ? "Done" : x.key === n.key ? "Next" : ""}</span></a></li>`).join("")}</ul>
+  ${otherWorkouts()}
   ${tabs("today")}`;
 }
 
@@ -384,6 +393,7 @@ const ADVICE_SHORT = {
 const REF_TABS = [["move", "Movement"], ["form", "Cues"], ["muscles", "Muscles"], ["why", "Notes"]];
 
 function viewRun() {
+  if (activeWorkout()?.kind === "interval") { setTimeout(() => go("#/interval")); return ""; }
   const w = activeWorkout();
   if (!w) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><div class="empty"><p>No session in progress.</p><a class="btn primary" href="#/">Go to today</a></div>`;
   const n = w.entries.length;
@@ -624,6 +634,252 @@ async function wakeLock(on) {
 }
 document.addEventListener("visibilitychange", () => { if (route().name === "run") wakeLock(true); });
 
+// ---------- Other workouts: interval (HIIT) routines ----------
+const intervalRoutines = () => db.list("routine").filter((r) => r.format === "interval").sort((a, b) => a.name.localeCompare(b.name));
+const routineSummary = (r) => {
+  const L = iv.levelOf(r.level || 1), sc = iv.schedule(r.items, r.level || 1);
+  return `${r.items.length} moves, ${L.work} s on, ${L.rest} s off, ${L.rounds} rounds, about ${iv.minutes(sc)} min`;
+};
+
+function otherWorkouts() {
+  const rs = intervalRoutines();
+  if (!rs.length) return "";
+  return `<div class="section-head"><h2>Other workouts</h2></div>
+  <ul class="rows">${rs.map((r) => `<li><a href="#/routine/${r.id}">${disc("KB", "none")}<span class="r-main"><span class="r-title">${esc(r.name)}</span><span class="r-sub">${esc(routineSummary(r))}</span></span><span class="chev" aria-hidden="true">›</span></a></li>`).join("")}</ul>`;
+}
+
+function viewRoutine(id) {
+  const r = db.get("routine", id);
+  if (!r || r.format !== "interval") return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><p>Workout not found.</p>${tabs("today")}`;
+  const ex = exById();
+  const L = iv.levelOf(r.level || 1);
+  const last = finished().find((w) => w.routineId === r.id);
+  const busy = activeWorkout();
+  return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a><div class="grow title">Other workouts</div></header>
+  <h1>${esc(r.name)}</h1>
+  <p class="prose" style="margin:var(--space-3) 0 var(--space-4)">${esc(r.description || "")}</p>
+  <dl class="chips">
+    <div><dt>Level</dt><dd>${r.level || 1} of ${iv.LEVELS.length}</dd></div>
+    <div><dt>Work / rest</dt><dd>${L.work} / ${L.rest} s</dd></div>
+    <div><dt>${L.rounds} rounds</dt><dd>${iv.minutes(iv.schedule(r.items, r.level || 1))} min</dd></div>
+  </dl>
+  <p class="small muted">${last ? `Last done ${fmtDate(last.startedAt)}${last.feel ? `, felt ${last.feel === "right" ? "about right" : last.feel}` : ""}. ` : ""}The level goes up when it feels easy (or about right twice running) and down when it's hard.</p>
+  <div class="section-head"><h2>Moves</h2><span class="small muted">Bell weight</span></div>
+  <ol class="iv-moves">${r.items.map((it, i) => {
+    const e = ex[it.exerciseId];
+    return `<li>
+      <a class="iv-move-name" href="#/exercise/${it.exerciseId}"><span>${esc(e?.name ?? it.exerciseId)}</span>
+        <span class="r-sub">${[it.sides ? "Both sides, switch halfway" : "", e?.pivot ? "Pivots on the back foot" : "", it.note].filter(Boolean).map(esc).join(". ")}</span></a>
+      <div class="stepper iv-bell"><button data-act="iv-bell" data-id="${r.id}" data-i="${i}" data-d="-2" aria-label="Lighter bell">−</button><span class="num">${fmtKg(it.bell || 0)}<small> kg</small></span><button data-act="iv-bell" data-id="${r.id}" data-i="${i}" data-d="2" aria-label="Heavier bell">+</button></div>
+    </li>`;
+  }).join("")}</ol>
+  <div style="margin-top:var(--space-5)"><button class="btn primary block" data-act="iv-begin" data-id="${r.id}" ${busy ? "disabled" : ""}>Start ${esc(r.name)}</button>
+  ${busy ? `<p class="small muted" style="margin-top:var(--space-2)">Finish the workout in progress first.</p>` : ""}</div>
+  ${tabs("today")}`;
+}
+
+async function beginInterval(routineId) {
+  const r = db.get("routine", routineId);
+  if (!r) return;
+  try { audio ||= new AudioContext(); audio.resume?.(); } catch {}
+  const ex = exById();
+  let achilles = null;
+  if (r.items.some((it) => ex[it.exerciseId]?.pivot)) {
+    achilles = await achillesSheet();
+    if (achilles === undefined) return;
+  }
+  const prev = finished().find((w) => w.achilles != null)?.achilles ?? null;
+  const plantToday = achilles != null && (achilles >= 4 || (prev != null && achilles - prev >= 2));
+  const L = iv.levelOf(r.level || 1);
+  const swapped = [];
+  const entries = r.items.map((it) => {
+    let e = ex[it.exerciseId];
+    let swappedFrom = null;
+    if (plantToday && e?.pivot && ex[e.planted]) { swappedFrom = e.id; swapped.push(`${e.name} → ${ex[e.planted].name}`); e = ex[e.planted]; }
+    return {
+      exerciseId: e?.id ?? it.exerciseId, name: e?.name ?? "Move", sides: !!it.sides, note: it.note || "", swappedFrom,
+      sets: Array.from({ length: L.rounds }, () => ({ weight: +it.bell || 0, secs: L.work, done: false })),
+    };
+  });
+  const w = db.put("workout", {
+    id: db.uid("w"), kind: "interval", routineId: r.id, name: r.name, level: r.level || 1,
+    work: L.work, rest: L.rest, rounds: L.rounds, startedAt: Date.now(), finishedAt: null, achilles, entries, feel: null,
+  });
+  db.ui({ activeWorkoutId: w.id, interval: { clock: { t0: Date.now(), pausedAt: null }, skipped: [], lastPhase: -1 }, rest: null });
+  if (swapped.length) toast(`Achilles ${achilles}/10: ${swapped.join(", ")} today`);
+  go("#/interval");
+}
+
+function intervalState() {
+  const w = activeWorkout();
+  const st = db.ui().interval;
+  if (!w || w.kind !== "interval" || !st) return null;
+  const sched = iv.schedule(w.entries, w.level);
+  const el = iv.elapsedOf(st.clock);
+  return { w, st, sched, el, pos: iv.at(sched, el) };
+}
+
+function intervalFocusExercise() {
+  const S = intervalState();
+  if (!S || S.pos.done) return null;
+  return S.w.entries[S.pos.phase.ex]?.exerciseId;
+}
+
+const PHASE_LABEL = { ready: "Get ready", work: "Work", rest: "Rest", roundRest: "Round rest" };
+
+function viewInterval() {
+  const S = intervalState();
+  if (!S) return `<header class="top"><a class="icon-btn" href="#/" aria-label="Back">${I.back}</a></header><div class="empty"><p>No workout in progress.</p><a class="btn primary" href="#/">Go to today</a></div>`;
+  const { w, st, sched, pos } = S;
+  const head = `<header class="top run-top">
+    <a class="icon-btn" href="#/" aria-label="Back to today">${I.back}</a>
+    <div class="grow title run-title">${disc("KB", "none")}<span>${esc(w.name)}</span></div>
+    <button class="icon-btn" data-act="iv-menu" aria-label="Workout options">${I.more}</button></header>`;
+
+  if (pos.done) {
+    const done = iv.completed(sched, S.el, st.skipped).length;
+    return `${head}
+    <section class="iv-done">
+      <p class="iv-phase">Finished</p>
+      <h1>${done} of ${sched.phases.filter((p) => p.type === "work").length} intervals</h1>
+      <div class="feel" role="group" aria-label="How did it feel?"><p>How did that feel?</p><div class="feel-btns">
+        ${["easy", "right", "hard"].map((f) => `<button data-act="iv-feel" data-v="${f}" aria-pressed="${w.feel === f}">${{ easy: "Easy", right: "About right", hard: "Hard" }[f]}</button>`).join("")}
+      </div><p class="small muted" style="margin-top:var(--space-3)">Sets next time's level: work time, rest and rounds.</p></div>
+      <button class="btn primary block" data-act="iv-finish" style="margin-top:var(--space-5)">Save workout</button>
+    </section>`;
+  }
+
+  const p = pos.phase;
+  const e = w.entries[p.ex];
+  const ex = db.get("exercise", e.exerciseId);
+  const working = p.type === "work";
+  const works = sched.phases.map((ph, i) => ({ ph, i })).filter(({ ph }) => ph.type === "work");
+  const doneSet = new Set(iv.completed(sched, S.el, st.skipped).map((c) => `${c.round}:${c.ex}`));
+  const sideText = working && p.switchAt != null ? (pos.side === 1 ? "First side" : "Second side") : "";
+  return `${head}
+  <nav class="seq iv-seq" aria-label="Intervals">${works.map(({ ph, i }) => `<span data-state="${doneSet.has(`${ph.round}:${ph.ex}`) ? "done" : "none"}" ${i === pos.i ? 'aria-current="step"' : ""}></span>`).join("")}</nav>
+  <section class="iv-focus" data-phase="${p.type}" aria-live="polite">
+    <div class="iv-row"><span class="iv-phase">${PHASE_LABEL[p.type]}${p.type === "work" ? "" : working ? "" : ", next up"}</span><span class="iv-round">Round ${p.round + 1} of ${sched.rounds}</span></div>
+    <div class="iv-clock" data-iv-clock>${mmss(Math.ceil(pos.left))}</div>
+    <h1 class="iv-move">${esc(e.name)}</h1>
+    <p class="iv-meta">${e.sets[0]?.weight ? `<strong>${fmtKg(e.sets[0].weight)} kg</strong>` : "Bodyweight"}${sideText ? ` <span class="iv-side" data-iv-side>${sideText}</span>` : e.sides ? " <span class=\"iv-side\">Both sides</span>" : ""}${e.swappedFrom ? ` <span class="tag">Swapped for your Achilles</span>` : ""}</p>
+  </section>
+  ${ex && motionFor(ex) ? `<div class="mv-card">${movementHtml(motionFor(ex), e.name)}</div>` : ""}
+  ${ex?.cues?.length ? `<ol class="cues iv-cues">${ex.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>` : ""}
+  <div class="run-nav iv-nav">
+    <div class="iv-btns">
+      <button class="btn tonal icon-only" data-act="iv-back" aria-label="Back">${I.back}</button>
+      <button class="btn primary" data-act="iv-pause">${st.clock.pausedAt ? "Resume" : "Pause"}</button>
+      <button class="btn tonal icon-only" data-act="iv-skip" aria-label="Skip">${I.back.replace("<svg", '<svg style="transform:scaleX(-1)"')}</button>
+    </div>
+  </div>`;
+}
+
+let ivTicker = null;
+function stopIntervalTicker() { clearInterval(ivTicker); ivTicker = null; }
+function startIntervalTicker() {
+  stopIntervalTicker();
+  let lastSide = null, lastBeepSec = null;
+  ivTicker = setInterval(() => {
+    const S = intervalState();
+    if (!S) return stopIntervalTicker();
+    const { st, pos } = S;
+    if ((pos.done ? -2 : pos.i) !== st.lastPhase) {
+      // Phase changed: record progress, signal, redraw.
+      saveIntervalProgress(S);
+      if (st.lastPhase !== -1 || pos.i > 0) cue(pos.done ? "done" : pos.phase.type);
+      db.ui({ interval: { ...st, lastPhase: pos.done ? -2 : pos.i } });
+      lastSide = null;
+      return render();
+    }
+    if (pos.done || st.clock.pausedAt) return;
+    const clock = $("[data-iv-clock]");
+    if (clock) clock.textContent = mmss(Math.ceil(pos.left));
+    const sec = Math.ceil(pos.left);
+    if (sec <= 3 && sec >= 1 && sec !== lastBeepSec && pos.phase.type !== "work") { lastBeepSec = sec; tone(660, 0.12); }
+    if (pos.side && lastSide && pos.side !== lastSide) { cue("switch"); const el = $("[data-iv-side]"); if (el) el.textContent = "Second side"; }
+    lastSide = pos.side || lastSide;
+  }, 200);
+}
+
+function tone(freq, dur, at = 0) {
+  try {
+    audio ||= new AudioContext();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = freq; o.connect(g); g.connect(audio.destination);
+    const t = audio.currentTime + at;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.start(t); o.stop(t + dur + 0.05);
+  } catch {}
+}
+function cue(kind) {
+  if (kind === "work") { tone(990, 0.18); tone(990, 0.3, 0.22); navigator.vibrate?.([200, 80, 200]); }
+  else if (kind === "switch") { tone(880, 0.25); navigator.vibrate?.([120, 60, 120, 60, 120]); }
+  else if (kind === "done") { tone(660, 0.2); tone(880, 0.2, 0.22); tone(1100, 0.4, 0.44); navigator.vibrate?.([300, 100, 300]); }
+  else { tone(520, 0.35); navigator.vibrate?.(300); }
+}
+
+function saveIntervalProgress(S) {
+  const { w, st, sched, el } = S;
+  const done = new Set(iv.completed(sched, el, st.skipped).map((c) => `${c.round}:${c.ex}`));
+  let changed = false;
+  w.entries.forEach((e, ei) => e.sets.forEach((set, r) => {
+    const d = done.has(`${r}:${ei}`);
+    if (set.done !== d) { set.done = d; changed = true; }
+  }));
+  if (changed) db.put("workout", w);
+}
+
+function intervalControl(action) {
+  const S = intervalState();
+  if (!S) return;
+  const { st, sched, el, pos } = S;
+  let clock = st.clock, skipped = st.skipped;
+  if (action === "pause") clock = clock.pausedAt ? iv.resume(clock) : iv.pause(clock);
+  if (action === "skip") {
+    if (pos.phase?.type === "work" && pos.into < pos.phase.secs / 2) skipped = [...skipped, pos.i];
+    clock = iv.seek(clock, iv.skipTo(sched, el));
+  }
+  if (action === "back") {
+    const to = iv.backTo(sched, el);
+    const target = iv.at(sched, to).i;
+    skipped = skipped.filter((i) => i < target);
+    clock = iv.seek(clock, to);
+  }
+  db.ui({ interval: { ...st, clock, skipped } });
+  render();
+}
+
+async function finishInterval(early) {
+  const S = intervalState();
+  if (!S) return;
+  const { w, st, sched, el } = S;
+  if (early) {
+    const done = iv.completed(sched, el, st.skipped).length;
+    if (!done) {
+      const { v } = await confirmSheet({ title: "Nothing done yet", body: "No interval has been finished, so there's nothing to save.", ok: "Keep going", extra: "Discard workout" });
+      if (v === "extra") { db.ui({ interval: null }); discardWorkout(w); }
+      return;
+    }
+  }
+  saveIntervalProgress(S);
+  w.finishedAt = Date.now();
+  w.roundsDone = Math.max(0, ...iv.completed(sched, el, st.skipped).map((c) => c.round + 1));
+  w.entries = w.entries.map((e) => ({ ...e, sets: e.sets.filter((x) => x.done) })).filter((e) => e.sets.length);
+  db.put("workout", w);
+  const r = db.get("routine", w.routineId);
+  if (r && w.feel) {
+    const prevFeel = finished().find((x) => x.routineId === r.id && x.id !== w.id)?.feel;
+    const next = iv.nextLevel(r.level || 1, w.feel, prevFeel);
+    if (next !== (r.level || 1)) { r.level = next; db.put("routine", r); toast(`Next time: level ${next}`); }
+  }
+  db.ui({ activeWorkoutId: null, interval: null, pendingCoach: w.id });
+  go(`#/workout/${w.id}`);
+  maybeRunPendingCoach();
+}
+
 // ---------- Coach ----------
 let coachBusy = null;      // trigger currently running
 let coachError = null;     // { message, noKey }
@@ -737,7 +993,8 @@ function viewWorkout(id) {
   <div class="stat-line">
     ${w.finishedAt && w.finishedAt - w.startedAt >= 60e3 ? `<div>${fmtDur(w.finishedAt - w.startedAt)}<small>duration</small></div>` : ""}
     <div>${sets.length}<small>sets</small></div>
-    <div>${Math.round(vol).toLocaleString("en-AU")}<small>kg lifted</small></div>
+    ${vol > 0 ? `<div>${Math.round(vol).toLocaleString("en-AU")}<small>kg lifted</small></div>` : ""}
+    ${w.kind === "interval" ? `<div>${w.roundsDone ?? "–"}/${w.rounds ?? "–"}<small>rounds</small></div><div>${w.level ?? 1}<small>level</small></div>` : ""}
     ${w.achilles != null ? `<div>${w.achilles}/10<small>Achilles</small></div>` : ""}
   </div>
   ${justNow || log ? `<section class="coach-on-workout"><h2>Coach</h2>${log ? logCard(log, { compact: true }) : coachStatus() || `<p class="muted small">Your coach reviews this session when you're back online.</p>`}</section>` : ""}
@@ -758,12 +1015,14 @@ function viewWorkout(id) {
 function groupSets(sets) {
   const out = [];
   for (const s of sets) {
-    const k = `${+s.weight || 0}|${s.reps}`;
+    const k = `${+s.weight || 0}|${s.reps}|${s.secs}`;
     const last = out[out.length - 1];
     if (last && last.k === k) last.n++;
-    else out.push({ k, n: 1, w: +s.weight || 0, r: s.reps });
+    else out.push({ k, n: 1, w: +s.weight || 0, r: s.reps, secs: s.secs });
   }
-  return out.map((g) => `${g.n > 1 ? `${g.n} × ` : ""}${g.r}${g.w ? ` at ${fmtKg(g.w)} kg` : " reps"}`);
+  return out.map((g) => g.secs
+    ? `${g.n} × ${g.secs} s${g.w ? ` at ${fmtKg(g.w)} kg` : ""}`
+    : `${g.n > 1 ? `${g.n} × ` : ""}${g.r}${g.w ? ` at ${fmtKg(g.w)} kg` : " reps"}`);
 }
 
 // ---------- History ----------
@@ -773,7 +1032,7 @@ function viewHistory() {
   <header class="top"><div class="grow"><h1>History</h1></div>${syncDot()}</header>
   ${ws.length ? `<ul class="rows">${ws.map((w) => {
     const sets = w.entries.reduce((a, e) => a + e.sets.length, 0);
-    return `<li><a href="#/workout/${w.id}">${disc(w.sessionKey ?? "", w.sessionKey ? hueFor(w.sessionKey, db.get("program", w.programId)) : "none")}<span class="r-main"><span class="r-title">${esc(w.name)}</span><br><span class="r-sub">${fmtDate(w.startedAt)}, ${fmtDur(w.finishedAt - w.startedAt)}</span></span><span class="r-side">${sets} sets</span></a></li>`;
+    return `<li><a href="#/workout/${w.id}">${disc(w.kind === "interval" ? "KB" : w.sessionKey ?? "", w.sessionKey ? hueFor(w.sessionKey, db.get("program", w.programId)) : "none")}<span class="r-main"><span class="r-title">${esc(w.name)}</span><br><span class="r-sub">${fmtDate(w.startedAt)}, ${fmtDur(w.finishedAt - w.startedAt)}</span></span><span class="r-side">${sets} sets</span></a></li>`;
   }).join("")}</ul>` : `<div class="empty"><p>Finished sessions show up here.</p><a class="btn primary" href="#/">Go to today</a></div>`}
   ${tabs("history")}`;
 }
@@ -1006,6 +1265,25 @@ document.addEventListener("click", async (ev) => {
     case "reload": ev.preventDefault(); location.reload(); return;
     case "signin": ev.preventDefault(); location.href = `/?signin=${Date.now()}${location.hash}`; return;
     case "begin": return beginSession(t.dataset.key);
+    case "iv-begin": return beginInterval(t.dataset.id);
+    case "iv-bell": {
+      const r = db.get("routine", t.dataset.id); const it = r.items[+t.dataset.i];
+      it.bell = Math.max(0, (+it.bell || 0) + +t.dataset.d); db.put("routine", r); return render();
+    }
+    case "iv-pause": return intervalControl("pause");
+    case "iv-skip": return intervalControl("skip");
+    case "iv-back": return intervalControl("back");
+    case "iv-feel": { const w = activeWorkout(); if (!w) return; w.feel = w.feel === t.dataset.v ? null : t.dataset.v; db.put("workout", w); return render(); }
+    case "iv-finish": return finishInterval(false);
+    case "iv-menu": {
+      const { v } = await confirmSheet({ title: "Workout options", ok: "Finish now", extra: "Discard workout", cancel: "Close" });
+      if (v === "ok") return finishInterval(true);
+      if (v === "extra") {
+        const c = await confirmSheet({ title: "Discard this workout?", body: "Nothing from it will be saved.", ok: "Discard workout", okClass: "danger" });
+        if (c.v === "ok") { const w = activeWorkout(); db.ui({ interval: null }); if (w) discardWorkout(w); }
+      }
+      return;
+    }
     case "mv-toggle": return toggleMovement(t);
     case "ref-tab": db.ui({ refTab: t.dataset.v, refOpen: true }); return render();
     case "ref-open": db.ui({ refOpen: db.ui().refOpen === false }); return render();
@@ -1224,7 +1502,7 @@ document.addEventListener("toggle", (ev) => {
 }, true);
 
 addEventListener("keydown", (e) => { if (e.key === "Escape" && sheetOpen) closeSheet(); });
-addEventListener("hashchange", () => { closeSheet(); render(); });
+addEventListener("hashchange", () => { closeSheet(); render(); scrollTo(0, 0); });
 
 // Re-render when another device's changes arrive, but never mid-typing or in a sheet.
 let pendingRender = false;
